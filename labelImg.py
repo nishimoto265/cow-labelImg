@@ -494,6 +494,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.move(position)
         save_dir = ustr(settings.get(SETTING_SAVE_DIR, None))
         self.last_open_dir = ustr(settings.get(SETTING_LAST_OPEN_DIR, None))
+        # Only use settings save_dir if no command line argument was provided
         if self.default_save_dir is None and save_dir is not None and os.path.exists(save_dir):
             self.default_save_dir = save_dir
             self.statusBar().showMessage('%s started. Annotation will be saved to %s' %
@@ -848,9 +849,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
                 shape.add_point(QPointF(x, y))
             shape.difficult = difficult
-            shape.close()
-            s.append(shape)
-
+            
             if line_color:
                 shape.line_color = QColor(*line_color)
             else:
@@ -860,6 +859,9 @@ class MainWindow(QMainWindow, WindowMixin):
                 shape.fill_color = QColor(*fill_color)
             else:
                 shape.fill_color = generate_color_by_text(label)
+                
+            shape.close()
+            s.append(shape)
 
             self.add_label(shape)
         self.update_combo_box()
@@ -1357,7 +1359,8 @@ class MainWindow(QMainWindow, WindowMixin):
             target_dir_path = ustr(default_open_dir_path)
         self.last_open_dir = target_dir_path
         self.import_dir_images(target_dir_path)
-        self.default_save_dir = target_dir_path
+        # Don't override command-line specified save dir
+        # self.default_save_dir = target_dir_path
         if self.file_path:
             self.show_bounding_box_from_annotation_file(file_path=self.file_path)
 
@@ -1638,7 +1641,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.set_format(FORMAT_YOLO)
         t_yolo_parse_reader = YoloReader(txt_path, self.image)
         shapes = t_yolo_parse_reader.get_shapes()
-        print(shapes)
+        # print(shapes)
         self.load_labels(shapes)
         self.canvas.verified = t_yolo_parse_reader.verified
 
