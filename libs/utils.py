@@ -82,10 +82,27 @@ def format_shortcut(text):
 def generate_color_by_text(text):
     s = ustr(text)
     hash_code = int(hashlib.sha256(s.encode('utf-8')).hexdigest(), 16)
-    r = int((hash_code / 255) % 255)
-    g = int((hash_code / 65025) % 255)
-    b = int((hash_code / 16581375) % 255)
-    return QColor(r, g, b, 100)
+    r = int((hash_code) % 256)
+    g = int((hash_code >> 8) % 256)
+    b = int((hash_code >> 16) % 256)
+    
+    # Ensure at least one channel is bright
+    max_channel = max(r, g, b)
+    if max_channel < 128:
+        # If all channels are dark, boost them
+        if r == max_channel:
+            r = 255
+        elif g == max_channel:
+            g = 255
+        else:
+            b = 255
+    
+    # Ensure minimum brightness for all channels
+    r = max(r, 80)
+    g = max(g, 80)
+    b = max(b, 80)
+    
+    return QColor(r, g, b, 200)
 
 
 def have_qstring():

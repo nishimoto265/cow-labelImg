@@ -78,6 +78,10 @@ class Canvas(QWidget):
 
     def leaveEvent(self, ev):
         self.restore_cursor()
+        if self.h_shape:
+            self.h_shape.highlight_clear()
+            self.h_vertex, self.h_shape = None, None
+            self.update()
 
     def focusOutEvent(self, ev):
         self.restore_cursor()
@@ -368,6 +372,18 @@ class Canvas(QWidget):
             shape.highlight_vertex(index, shape.MOVE_VERTEX)
             self.select_shape(shape)
             return self.h_vertex
+        
+        # First, check for vertices of all shapes
+        for shape in reversed(self.shapes):
+            if self.isVisible(shape):
+                index = shape.nearest_vertex(point, self.epsilon)
+                if index is not None:
+                    self.h_vertex, self.h_shape = index, shape
+                    shape.highlight_vertex(index, shape.MOVE_VERTEX)
+                    self.select_shape(shape)
+                    return self.h_vertex
+        
+        # If no vertex found, then check for shapes
         for shape in reversed(self.shapes):
             if self.isVisible(shape) and shape.contains_point(point):
                 self.select_shape(shape)
