@@ -1,6 +1,9 @@
 #!/bin/bash
 # Launch labelImg with cow annotations
 
+# Change to the script's directory
+cd "$(dirname "$0")"
+
 # Configuration
 IMAGE_DIR="/media/thithilab/volume/research/datasets/test_images/right_images_masked"
 CLASSES_FILE="/media/thithilab/volume/research/outputs/cow_right_detection_txt_labelimg/classes.txt"

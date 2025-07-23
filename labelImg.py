@@ -1165,9 +1165,10 @@ class MainWindow(QMainWindow, WindowMixin):
             self.setWindowTitle(__appname__ + ' ' + file_path + ' ' + counter)
 
             # Default : select last item if there is at least one item
-            if self.label_list.count():
-                self.label_list.setCurrentItem(self.label_list.item(self.label_list.count() - 1))
-                self.label_list.item(self.label_list.count() - 1).setSelected(True)
+            # Disabled auto-selection on frame change
+            # if self.label_list.count():
+            #     self.label_list.setCurrentItem(self.label_list.item(self.label_list.count() - 1))
+            #     self.label_list.item(self.label_list.count() - 1).setSelected(True)
 
             self.canvas.setFocus(True)
             return True
