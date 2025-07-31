@@ -47,6 +47,7 @@ from libs.create_ml_io import CreateMLReader
 from libs.create_ml_io import JSON_EXT
 from libs.ustr import ustr
 from libs.hashableQListWidgetItem import HashableQListWidgetItem
+from libs.tracker import Tracker
 
 __appname__ = 'labelImg'
 
@@ -121,6 +122,11 @@ class MainWindow(QMainWindow, WindowMixin):
         self.items_to_shapes = {}
         self.shapes_to_items = {}
         self.prev_label_text = ''
+        
+        # Initialize tracking
+        self.continuous_tracking_mode = False
+        self.tracker = Tracker()
+        self.prev_frame_shapes = []
 
         list_layout = QVBoxLayout()
         list_layout.setContentsMargins(0, 0, 0, 0)
@@ -147,6 +153,12 @@ class MainWindow(QMainWindow, WindowMixin):
         list_layout.addWidget(self.edit_button)
         list_layout.addWidget(self.diffc_button)
         list_layout.addWidget(use_default_label_container)
+        
+        # Create continuous tracking checkbox
+        self.continuous_tracking_checkbox = QCheckBox("連続ID付けモード")
+        self.continuous_tracking_checkbox.setChecked(False)
+        self.continuous_tracking_checkbox.stateChanged.connect(self.toggle_continuous_tracking)
+        list_layout.addWidget(self.continuous_tracking_checkbox)
 
         # Create and add combobox for showing unique labels in group
         self.combo_box = ComboBox(self)
@@ -651,6 +663,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.reset_state()
         self.label_coordinates.clear()
         self.combo_box.cb.clear()
+        # Reset tracking information
+        self.prev_frame_shapes = []
+        self.tracker.reset()
 
     def current_item(self):
         items = self.label_list.selectedItems()
@@ -1421,7 +1436,11 @@ class MainWindow(QMainWindow, WindowMixin):
             self.cur_img_idx -= 1
             filename = self.m_img_list[self.cur_img_idx]
             if filename:
+                # Store current shapes before loading prev image
+                self.store_current_shapes()
                 self.load_file(filename)
+                # Apply tracking after loading new image
+                self.apply_tracking()
 
     def open_next_image(self, _value=False):
         # Proceeding next image without dialog if having any label
@@ -1452,7 +1471,11 @@ class MainWindow(QMainWindow, WindowMixin):
                 filename = self.m_img_list[self.cur_img_idx]
 
         if filename:
+            # Store current shapes before loading next image
+            self.store_current_shapes()
             self.load_file(filename)
+            # Apply tracking after loading new image
+            self.apply_tracking()
 
     def open_file(self, _value=False):
         if not self.may_continue():
@@ -1672,6 +1695,37 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def toggle_draw_square(self):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())
+    
+    def toggle_continuous_tracking(self, state):
+        """Toggle continuous tracking mode."""
+        self.continuous_tracking_mode = (state == Qt.Checked)
+    
+    def store_current_shapes(self):
+        """Store current frame shapes for tracking."""
+        if self.canvas.shapes:
+            self.prev_frame_shapes = [shape.copy() for shape in self.canvas.shapes]
+        else:
+            self.prev_frame_shapes = []
+    
+    def apply_tracking(self):
+        """Apply tracking to current frame shapes."""
+        if not self.continuous_tracking_mode:
+            return
+        
+        if not self.prev_frame_shapes:
+            return
+        
+        # Get current shapes
+        curr_shapes = self.canvas.shapes
+        if not curr_shapes:
+            return
+        
+        # Apply tracking
+        self.tracker.track_shapes(self.prev_frame_shapes, curr_shapes)
+        
+        # Update labels in the GUI
+        self.load_labels(curr_shapes)
+        self.canvas.loadShapes(curr_shapes)
 
 def inverted(color):
     return QColor(*[255 - v for v in color.getRgb()])

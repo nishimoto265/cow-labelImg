@@ -45,6 +45,8 @@ class Shape(object):
         self.selected = False
         self.difficult = difficult
         self.paint_label = paint_label
+        self.track_id = None
+        self.is_tracked = False
 
         self._highlight_index = None
         self._highlight_mode = self.NEAR_VERTEX
@@ -90,6 +92,11 @@ class Shape(object):
             pen = QPen(color)
             # Try using integer sizes for smoother drawing(?)
             pen.setWidth(max(2, int(round(3.0 / self.scale))))
+            
+            # Set dashed line style for tracked shapes
+            if self.is_tracked:
+                pen.setStyle(Qt.DashLine)
+            
             painter.setPen(pen)
 
             line_path = QPainterPath()
@@ -197,6 +204,8 @@ class Shape(object):
         if self.fill_color != Shape.fill_color:
             shape.fill_color = self.fill_color
         shape.difficult = self.difficult
+        shape.track_id = self.track_id
+        shape.is_tracked = self.is_tracked
         return shape
 
     def __len__(self):
