@@ -1798,6 +1798,7 @@ class MainWindow(QMainWindow, WindowMixin):
             return
         
         print(f"[Propagate] Starting label propagation from frame {self.cur_img_idx}")
+        print(f"[Propagate] Will stop when encountering label: {source_shape.label}")
         
         # Create progress dialog
         progress = self._create_progress_dialog()
@@ -1810,7 +1811,7 @@ class MainWindow(QMainWindow, WindowMixin):
         }
         
         # Process propagation
-        frames_processed = self._process_propagation(source_shape, progress, current_state)
+        frames_processed = self._process_propagation(source_shape, progress, current_state, source_shape.label)
         
         # Close progress and restore state
         progress.close()
@@ -1829,7 +1830,7 @@ class MainWindow(QMainWindow, WindowMixin):
         progress.setValue(0)
         return progress
     
-    def _process_propagation(self, source_shape, progress, current_state):
+    def _process_propagation(self, source_shape, progress, current_state, stop_label=None):
         """Process label propagation to subsequent frames."""
         source_label = source_shape.label
         prev_shape = source_shape.copy()
@@ -1865,8 +1866,14 @@ class MainWindow(QMainWindow, WindowMixin):
             best_match_idx, best_iou = self._find_best_match(shapes_data, prev_shape)
             
             if best_match_idx >= 0:
+                # Check if the matched shape already has the same label (stop condition)
+                current_label = shapes_data[best_match_idx][0]
+                if stop_label and current_label == stop_label:
+                    print(f"[Propagate] Encountered same label '{stop_label}' at frame {frame_idx}, stopping")
+                    break
+                
                 # Update the matched shape's label
-                print(f"[Propagate] Found match at frame {frame_idx} with IOU {best_iou:.2f}")
+                print(f"[Propagate] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current label: {current_label})")
                 shapes_data[best_match_idx] = self._update_shape_label(shapes_data[best_match_idx], source_label)
                 
                 # Save the updated annotation
