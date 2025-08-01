@@ -117,6 +117,17 @@ class Tracker:
         Returns:
             None (modifies curr_shapes in place)
         """
+        # Initialize attributes if not exist
+        for shape in curr_shapes:
+            if not hasattr(shape, 'track_id'):
+                shape.track_id = None
+            if not hasattr(shape, 'is_tracked'):
+                shape.is_tracked = False
+        
+        for shape in prev_shapes:
+            if not hasattr(shape, 'track_id'):
+                shape.track_id = None
+        
         if not prev_shapes:
             # First frame: assign new IDs to all shapes
             for shape in curr_shapes:
@@ -143,6 +154,9 @@ class Tracker:
                 curr_shapes[j].track_id = prev_shapes[i].track_id
                 curr_shapes[j].label = prev_shapes[i].label
                 curr_shapes[j].is_tracked = True
+                # Update line color based on new label
+                if hasattr(prev_shapes[i], 'line_color'):
+                    curr_shapes[j].line_color = prev_shapes[i].line_color
                 matched_curr_indices.add(j)
         
         # Assign new IDs to unmatched shapes

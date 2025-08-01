@@ -1109,7 +1109,19 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def load_file(self, file_path=None):
         """Load the specified file, or the last opened file if None."""
+        # Save tracking info before reset
+        temp_prev_shapes = self.prev_frame_shapes if hasattr(self, 'prev_frame_shapes') else []
+        temp_tracking_mode = self.continuous_tracking_mode if hasattr(self, 'continuous_tracking_mode') else False
+        temp_next_track_id = self.tracker.next_track_id if hasattr(self, 'tracker') else 1
+        
         self.reset_state()
+        
+        # Restore tracking info after reset
+        self.prev_frame_shapes = temp_prev_shapes
+        self.continuous_tracking_mode = temp_tracking_mode
+        if hasattr(self, 'tracker'):
+            self.tracker.next_track_id = temp_next_track_id
+        
         self.canvas.setEnabled(False)
         if file_path is None:
             file_path = self.settings.get(SETTING_FILENAME)
@@ -1437,10 +1449,20 @@ class MainWindow(QMainWindow, WindowMixin):
             filename = self.m_img_list[self.cur_img_idx]
             if filename:
                 # Store current shapes before loading prev image
-                self.store_current_shapes()
+                if self.continuous_tracking_mode:
+                    # Ensure shapes have track IDs before storing
+                    if self.canvas.shapes:
+                        for shape in self.canvas.shapes:
+                            if not hasattr(shape, 'track_id') or shape.track_id is None:
+                                shape.track_id = self.tracker.next_track_id
+                                self.tracker.next_track_id += 1
+                    self.store_current_shapes()
+                
                 self.load_file(filename)
+                
                 # Apply tracking after loading new image
-                self.apply_tracking()
+                if self.continuous_tracking_mode:
+                    self.apply_tracking()
 
     def open_next_image(self, _value=False):
         # Proceeding next image without dialog if having any label
@@ -1472,10 +1494,20 @@ class MainWindow(QMainWindow, WindowMixin):
 
         if filename:
             # Store current shapes before loading next image
-            self.store_current_shapes()
+            if self.continuous_tracking_mode:
+                # Ensure shapes have track IDs before storing
+                if self.canvas.shapes:
+                    for shape in self.canvas.shapes:
+                        if not hasattr(shape, 'track_id') or shape.track_id is None:
+                            shape.track_id = self.tracker.next_track_id
+                            self.tracker.next_track_id += 1
+                self.store_current_shapes()
+            
             self.load_file(filename)
+            
             # Apply tracking after loading new image
-            self.apply_tracking()
+            if self.continuous_tracking_mode:
+                self.apply_tracking()
 
     def open_file(self, _value=False):
         if not self.may_continue():
@@ -1699,6 +1731,15 @@ class MainWindow(QMainWindow, WindowMixin):
     def toggle_continuous_tracking(self, state):
         """Toggle continuous tracking mode."""
         self.continuous_tracking_mode = (state == Qt.Checked)
+        
+        # If turning on tracking mode, assign IDs to current shapes
+        if self.continuous_tracking_mode and self.canvas.shapes:
+            for shape in self.canvas.shapes:
+                if not hasattr(shape, 'track_id') or shape.track_id is None:
+                    shape.track_id = self.tracker.next_track_id
+                    self.tracker.next_track_id += 1
+                if not hasattr(shape, 'is_tracked'):
+                    shape.is_tracked = False
     
     def store_current_shapes(self):
         """Store current frame shapes for tracking."""
@@ -1720,12 +1761,28 @@ class MainWindow(QMainWindow, WindowMixin):
         if not curr_shapes:
             return
         
+        # Debug: Print before tracking
+        print(f"[Tracking] Prev shapes: {[(s.label, getattr(s, 'track_id', None)) for s in self.prev_frame_shapes]}")
+        print(f"[Tracking] Curr shapes before: {[(s.label, getattr(s, 'track_id', None)) for s in curr_shapes]}")
+        
         # Apply tracking
         self.tracker.track_shapes(self.prev_frame_shapes, curr_shapes)
         
-        # Update labels in the GUI
-        self.load_labels(curr_shapes)
-        self.canvas.loadShapes(curr_shapes)
+        # Debug: Print after tracking
+        print(f"[Tracking] Curr shapes after: {[(s.label, getattr(s, 'track_id', None), getattr(s, 'is_tracked', False)) for s in curr_shapes]}")
+        
+        # Update colors for tracked shapes
+        for shape in curr_shapes:
+            if getattr(shape, 'is_tracked', False) and shape.label:
+                shape.line_color = generate_color_by_text(shape.label)
+        
+        # Update canvas directly (don't use load_labels)
+        self.canvas.load_shapes(curr_shapes)
+        
+        # Update label list
+        self.label_list.clear()
+        for shape in curr_shapes:
+            self.add_label(shape)
 
 def inverted(color):
     return QColor(*[255 - v for v in color.getRgb()])
