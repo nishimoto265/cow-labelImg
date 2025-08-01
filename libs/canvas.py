@@ -29,6 +29,7 @@ class Canvas(QWidget):
     selectionChanged = pyqtSignal(bool)
     shapeMoved = pyqtSignal()
     drawingPolygon = pyqtSignal(bool)
+    shapeClicked = pyqtSignal()
 
     CREATE, EDIT = list(range(2))
 
@@ -388,6 +389,7 @@ class Canvas(QWidget):
             if self.isVisible(shape) and shape.contains_point(point):
                 self.select_shape(shape)
                 self.calculate_offsets(shape, point)
+                self.shapeClicked.emit()
                 return self.selected_shape
         return None
 

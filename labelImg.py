@@ -127,6 +127,10 @@ class MainWindow(QMainWindow, WindowMixin):
         self.continuous_tracking_mode = False
         self.tracker = Tracker()
         self.prev_frame_shapes = []
+        
+        # Initialize click-to-change-label mode
+        self.click_change_label_mode = False
+        self._applying_label = False
 
         list_layout = QVBoxLayout()
         list_layout.setContentsMargins(0, 0, 0, 0)
@@ -159,6 +163,12 @@ class MainWindow(QMainWindow, WindowMixin):
         self.continuous_tracking_checkbox.setChecked(False)
         self.continuous_tracking_checkbox.stateChanged.connect(self.toggle_continuous_tracking)
         list_layout.addWidget(self.continuous_tracking_checkbox)
+        
+        # Create click-to-change-label checkbox
+        self.click_change_label_checkbox = QCheckBox("クリックでラベル変更")
+        self.click_change_label_checkbox.setChecked(False)
+        self.click_change_label_checkbox.stateChanged.connect(self.toggle_click_change_label)
+        list_layout.addWidget(self.click_change_label_checkbox)
 
         # Create and add combobox for showing unique labels in group
         self.combo_box = ComboBox(self)
@@ -215,6 +225,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.shapeMoved.connect(self.set_dirty)
         self.canvas.selectionChanged.connect(self.shape_selection_changed)
         self.canvas.drawingPolygon.connect(self.toggle_drawing_sensitive)
+        self.canvas.shapeClicked.connect(self.on_shape_clicked)
 
         self.setCentralWidget(scroll)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
@@ -900,12 +911,16 @@ class MainWindow(QMainWindow, WindowMixin):
             self.label_file.verified = self.canvas.verified
 
         def format_shape(s):
-            return dict(label=s.label,
+            result = dict(label=s.label,
                         line_color=s.line_color.getRgb(),
                         fill_color=s.fill_color.getRgb(),
                         points=[(p.x(), p.y()) for p in s.points],
                         # add chris
                         difficult=s.difficult)
+            # Add track_id if it exists
+            if hasattr(s, 'track_id') and s.track_id is not None:
+                result['track_id'] = s.track_id
+            return result
 
         shapes = [format_shape(shape) for shape in self.canvas.shapes]
         # Can add different annotation formats here
@@ -1107,10 +1122,10 @@ class MainWindow(QMainWindow, WindowMixin):
         for item, shape in self.items_to_shapes.items():
             item.setCheckState(Qt.Checked if value else Qt.Unchecked)
 
-    def load_file(self, file_path=None):
+    def load_file(self, file_path=None, clear_prev_shapes=False):
         """Load the specified file, or the last opened file if None."""
         # Save tracking info before reset
-        temp_prev_shapes = self.prev_frame_shapes if hasattr(self, 'prev_frame_shapes') else []
+        temp_prev_shapes = self.prev_frame_shapes if hasattr(self, 'prev_frame_shapes') and not clear_prev_shapes else []
         temp_tracking_mode = self.continuous_tracking_mode if hasattr(self, 'continuous_tracking_mode') else False
         temp_next_track_id = self.tracker.next_track_id if hasattr(self, 'tracker') else 1
         
@@ -1448,21 +1463,9 @@ class MainWindow(QMainWindow, WindowMixin):
             self.cur_img_idx -= 1
             filename = self.m_img_list[self.cur_img_idx]
             if filename:
-                # Store current shapes before loading prev image
-                if self.continuous_tracking_mode:
-                    # Ensure shapes have track IDs before storing
-                    if self.canvas.shapes:
-                        for shape in self.canvas.shapes:
-                            if not hasattr(shape, 'track_id') or shape.track_id is None:
-                                shape.track_id = self.tracker.next_track_id
-                                self.tracker.next_track_id += 1
-                    self.store_current_shapes()
-                
-                self.load_file(filename)
-                
-                # Apply tracking after loading new image
-                if self.continuous_tracking_mode:
-                    self.apply_tracking()
+                # When going to previous frame, load with clear_prev_shapes=True
+                print(f"[Navigation] Going to previous frame {self.cur_img_idx}")
+                self.load_file(filename, clear_prev_shapes=True)
 
     def open_next_image(self, _value=False):
         # Proceeding next image without dialog if having any label
@@ -1493,21 +1496,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 filename = self.m_img_list[self.cur_img_idx]
 
         if filename:
-            # Store current shapes before loading next image
-            if self.continuous_tracking_mode:
-                # Ensure shapes have track IDs before storing
-                if self.canvas.shapes:
-                    for shape in self.canvas.shapes:
-                        if not hasattr(shape, 'track_id') or shape.track_id is None:
-                            shape.track_id = self.tracker.next_track_id
-                            self.tracker.next_track_id += 1
-                self.store_current_shapes()
-            
+            # Just load the file normally
             self.load_file(filename)
-            
-            # Apply tracking after loading new image
-            if self.continuous_tracking_mode:
-                self.apply_tracking()
 
     def open_file(self, _value=False):
         if not self.may_continue():
@@ -1732,21 +1722,294 @@ class MainWindow(QMainWindow, WindowMixin):
         """Toggle continuous tracking mode."""
         self.continuous_tracking_mode = (state == Qt.Checked)
         
-        # If turning on tracking mode, assign IDs to current shapes
-        if self.continuous_tracking_mode and self.canvas.shapes:
-            for shape in self.canvas.shapes:
-                if not hasattr(shape, 'track_id') or shape.track_id is None:
-                    shape.track_id = self.tracker.next_track_id
-                    self.tracker.next_track_id += 1
-                if not hasattr(shape, 'is_tracked'):
-                    shape.is_tracked = False
+        if self.continuous_tracking_mode:
+            # If turning on tracking mode, assign IDs to current shapes
+            if self.canvas.shapes:
+                for shape in self.canvas.shapes:
+                    if not hasattr(shape, 'track_id') or shape.track_id is None:
+                        shape.track_id = self.tracker.next_track_id
+                        self.tracker.next_track_id += 1
+                    if not hasattr(shape, 'is_tracked'):
+                        shape.is_tracked = False
+        else:
+            # If turning off tracking mode, clear prev_frame_shapes
+            self.prev_frame_shapes = []
+    
+    def toggle_click_change_label(self, state):
+        """Toggle click-to-change-label mode."""
+        self.click_change_label_mode = (state == Qt.Checked)
+    
+    def on_shape_clicked(self):
+        """Handle shape click event for label change."""
+        if self.click_change_label_mode:
+            self.apply_label_to_selected_shape()
+    
+    def apply_label_to_selected_shape(self):
+        """Apply label to the selected shape based on current settings."""
+        if not self.click_change_label_mode:
+            return
+            
+        if self._applying_label:
+            return
+            
+        shape = self.canvas.selected_shape
+        if not shape:
+            return
+        
+        # Get the current item in label list
+        item = self.shapes_to_items.get(shape)
+        if not item:
+            return
+        
+        # Set flag to prevent recursion
+        self._applying_label = True
+        
+        # Check if using default label
+        if self.use_default_label_checkbox.isChecked() and self.default_label:
+            # Apply default label
+            shape.label = self.default_label
+            item.setText(self.default_label)
+        else:
+            # Show label dialog
+            text = self.label_dialog.pop_up(item.text())
+            if text is not None:
+                shape.label = text
+                item.setText(text)
+        
+        # Update shape color based on new label
+        shape.line_color = generate_color_by_text(shape.label)
+        item.setBackground(generate_color_by_text(shape.label))
+        
+        # Mark as dirty and update
+        self.set_dirty()
+        self.canvas.load_shapes(self.canvas.shapes)
+        self.update_combo_box()
+        
+        # If continuous tracking mode is ON, propagate label to subsequent frames
+        if self.continuous_tracking_mode:
+            self.propagate_label_to_subsequent_frames(shape)
+        
+        # Reset flag
+        self._applying_label = False
+    
+    def propagate_label_to_subsequent_frames(self, source_shape):
+        """Propagate label changes to subsequent frames until tracking fails."""
+        if not self.continuous_tracking_mode or not source_shape:
+            return
+        
+        print(f"[Propagate] Starting label propagation from frame {self.cur_img_idx}")
+        
+        # Create progress dialog
+        progress = QProgressDialog("連続ID付け処理中...", "キャンセル", 0, self.img_count - self.cur_img_idx - 1, self)
+        progress.setWindowTitle("処理中")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        
+        # Save current state
+        current_frame_idx = self.cur_img_idx
+        current_dirty = self.dirty
+        
+        # Get source shape info
+        source_label = source_shape.label
+        source_bbox = [(p.x(), p.y()) for p in source_shape.points]
+        
+        # Create a temporary shape for tracking
+        prev_shape = source_shape.copy()
+        
+        # Process subsequent frames
+        frame_idx = current_frame_idx + 1
+        frames_processed = 0
+        while frame_idx < self.img_count:
+            # Check if cancelled
+            if progress.wasCanceled():
+                print(f"[Propagate] Cancelled by user at frame {frame_idx}")
+                break
+            
+            # Update progress
+            progress.setValue(frame_idx - current_frame_idx)
+            progress.setLabelText(f"処理中: フレーム {frame_idx + 1}/{self.img_count}")
+            QApplication.processEvents()
+            # Load the next frame's annotation file
+            next_file = self.m_img_list[frame_idx]
+            basename = os.path.basename(os.path.splitext(next_file)[0])
+            
+            # Check for annotation files
+            annotation_found = False
+            shapes_data = None
+            
+            if self.default_save_dir:
+                xml_path = os.path.join(self.default_save_dir, basename + XML_EXT)
+                txt_path = os.path.join(self.default_save_dir, basename + TXT_EXT)
+                json_path = os.path.join(self.default_save_dir, basename + JSON_EXT)
+            else:
+                xml_path = os.path.splitext(next_file)[0] + XML_EXT
+                txt_path = os.path.splitext(next_file)[0] + TXT_EXT
+                json_path = os.path.splitext(next_file)[0] + JSON_EXT
+            
+            # Load shapes from annotation file
+            if os.path.isfile(xml_path):
+                from libs.pascal_voc_io import PascalVocReader
+                reader = PascalVocReader(xml_path)
+                shapes_data = reader.get_shapes()
+                annotation_found = True
+            elif os.path.isfile(txt_path):
+                # Load image for YOLO format conversion
+                if os.path.isfile(next_file):
+                    image = QImage()
+                    image.load(next_file)
+                    if not image.isNull():
+                        from libs.yolo_io import YoloReader
+                        reader = YoloReader(txt_path, image)
+                        shapes_data = reader.get_shapes()
+                        annotation_found = True
+                    else:
+                        print(f"[Propagate] Failed to load image at frame {frame_idx}")
+                        break
+                else:
+                    print(f"[Propagate] Image file not found at frame {frame_idx}")
+                    break
+            elif os.path.isfile(json_path):
+                from libs.create_ml_io import CreateMLReader
+                reader = CreateMLReader(json_path, next_file)
+                shapes_data = reader.get_shapes()
+                annotation_found = True
+            
+            if not annotation_found or not shapes_data:
+                print(f"[Propagate] No annotation found at frame {frame_idx}, stopping")
+                break
+            
+            # Find matching shape in next frame
+            best_match_idx = -1
+            best_iou = 0.0
+            
+            for idx, shape_data in enumerate(shapes_data):
+                # shape_data is (label, points, line_color, fill_color, difficult)
+                points = shape_data[1]
+                
+                # Calculate IOU with prev_shape
+                curr_shape = Shape()
+                for x, y in points:
+                    curr_shape.add_point(QPointF(x, y))
+                
+                iou = self.tracker.calculate_iou(prev_shape, curr_shape)
+                if iou > best_iou and iou >= self.tracker.iou_threshold:
+                    best_iou = iou
+                    best_match_idx = idx
+            
+            if best_match_idx >= 0:
+                # Update the matched shape's label
+                print(f"[Propagate] Found match at frame {frame_idx} with IOU {best_iou:.2f}")
+                
+                # Modify shapes_data
+                old_shape = shapes_data[best_match_idx]
+                new_shape = (source_label, old_shape[1], old_shape[2], old_shape[3], old_shape[4])
+                shapes_data[best_match_idx] = new_shape
+                
+                # Save the updated annotation
+                # Determine file format
+                save_format = None
+                save_path = None
+                if os.path.isfile(xml_path):
+                    save_format = LabelFileFormat.PASCAL_VOC
+                    save_path = xml_path
+                elif os.path.isfile(txt_path):
+                    save_format = LabelFileFormat.YOLO
+                    save_path = txt_path
+                elif os.path.isfile(json_path):
+                    save_format = LabelFileFormat.CREATE_ML
+                    save_path = json_path
+                
+                if save_format and save_path:
+                    # Create shapes for saving
+                    temp_canvas_shapes = []
+                    for shape_data in shapes_data:
+                        label, points, line_color, fill_color, difficult = shape_data
+                        shape = Shape(label=label)
+                        for x, y in points:
+                            shape.add_point(QPointF(x, y))
+                        shape.difficult = difficult
+                        if line_color:
+                            shape.line_color = QColor(*line_color)
+                        else:
+                            shape.line_color = generate_color_by_text(label)
+                        if fill_color:
+                            shape.fill_color = QColor(*fill_color)
+                        else:
+                            shape.fill_color = generate_color_by_text(label)
+                        shape.close()
+                        temp_canvas_shapes.append(shape)
+                    
+                    # Save directly using label file
+                    temp_label_file = LabelFile()
+                    
+                    if save_format == LabelFileFormat.PASCAL_VOC:
+                        shapes_for_save = [dict(label=s.label,
+                                              line_color=s.line_color.getRgb(),
+                                              fill_color=s.fill_color.getRgb(),
+                                              points=[(p.x(), p.y()) for p in s.points],
+                                              difficult=s.difficult) for s in temp_canvas_shapes]
+                        temp_label_file.save_pascal_voc_format(save_path, shapes_for_save, next_file, None,
+                                                               self.line_color.getRgb(), self.fill_color.getRgb())
+                    elif save_format == LabelFileFormat.YOLO:
+                        # For YOLO, we need the image
+                        if os.path.isfile(next_file):
+                            image = QImage()
+                            image.load(next_file)
+                            if not image.isNull():
+                                image_data = read(next_file, None)
+                                shapes_for_save = [dict(label=s.label,
+                                                      line_color=s.line_color.getRgb(),
+                                                      fill_color=s.fill_color.getRgb(),
+                                                      points=[(p.x(), p.y()) for p in s.points],
+                                                      difficult=s.difficult) for s in temp_canvas_shapes]
+                                temp_label_file.save_yolo_format(save_path, shapes_for_save, next_file, image_data, self.label_hist,
+                                                               self.line_color.getRgb(), self.fill_color.getRgb())
+                    elif save_format == LabelFileFormat.CREATE_ML:
+                        shapes_for_save = [dict(label=s.label,
+                                              line_color=s.line_color.getRgb(),
+                                              fill_color=s.fill_color.getRgb(),
+                                              points=[(p.x(), p.y()) for p in s.points],
+                                              difficult=s.difficult) for s in temp_canvas_shapes]
+                        temp_label_file.save_create_ml_format(save_path, shapes_for_save, next_file, None,
+                                                             self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+                    
+                    print(f"[Propagate] Saved updated annotation to {save_path}")
+                
+                # Update prev_shape for next iteration
+                prev_shape = temp_canvas_shapes[best_match_idx]
+                frames_processed += 1
+                
+                frame_idx += 1
+            else:
+                print(f"[Propagate] No match found at frame {frame_idx}, stopping")
+                break
+        
+        # Close progress dialog
+        progress.close()
+        
+        # Restore original state
+        self.cur_img_idx = current_frame_idx
+        self.file_path = self.m_img_list[current_frame_idx] if current_frame_idx < self.img_count else None
+        self.dirty = current_dirty
+        
+        print(f"[Propagate] Completed. Propagated to {frames_processed} frames")
+        
+        # Show completion message in status bar
+        if frames_processed > 0:
+            self.statusBar().showMessage(f'連続ID付けが完了しました。{frames_processed}フレームに伝播しました。', 3000)
+        else:
+            self.statusBar().showMessage('追跡可能なフレームが見つかりませんでした。', 3000)
+        self.statusBar().show()
     
     def store_current_shapes(self):
         """Store current frame shapes for tracking."""
         if self.canvas.shapes:
             self.prev_frame_shapes = [shape.copy() for shape in self.canvas.shapes]
+            print(f"[Store] Stored {len(self.prev_frame_shapes)} shapes from frame {self.cur_img_idx}")
         else:
             self.prev_frame_shapes = []
+            print(f"[Store] No shapes to store from frame {self.cur_img_idx}")
     
     def apply_tracking(self):
         """Apply tracking to current frame shapes."""
@@ -1762,6 +2025,7 @@ class MainWindow(QMainWindow, WindowMixin):
             return
         
         # Debug: Print before tracking
+        print(f"[Tracking] Applying tracking to frame {self.cur_img_idx}")
         print(f"[Tracking] Prev shapes: {[(s.label, getattr(s, 'track_id', None)) for s in self.prev_frame_shapes]}")
         print(f"[Tracking] Curr shapes before: {[(s.label, getattr(s, 'track_id', None)) for s in curr_shapes]}")
         
@@ -1776,13 +2040,21 @@ class MainWindow(QMainWindow, WindowMixin):
             if getattr(shape, 'is_tracked', False) and shape.label:
                 shape.line_color = generate_color_by_text(shape.label)
         
-        # Update canvas directly (don't use load_labels)
+        # Update canvas
         self.canvas.load_shapes(curr_shapes)
         
-        # Update label list
+        # Update label list properly
         self.label_list.clear()
+        self.items_to_shapes.clear()
+        self.shapes_to_items.clear()
+        
         for shape in curr_shapes:
+            # Ensure shape has proper paint_label setting
+            shape.paint_label = self.display_label_option.isChecked()
             self.add_label(shape)
+        
+        # Update combo box
+        self.update_combo_box()
 
 def inverted(color):
     return QColor(*[255 - v for v in color.getRgb()])
