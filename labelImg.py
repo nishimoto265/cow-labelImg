@@ -1800,26 +1800,48 @@ class MainWindow(QMainWindow, WindowMixin):
         print(f"[Propagate] Starting label propagation from frame {self.cur_img_idx}")
         
         # Create progress dialog
-        progress = QProgressDialog("連続ID付け処理中...", "キャンセル", 0, self.img_count - self.cur_img_idx - 1, self)
+        progress = self._create_progress_dialog()
+        
+        # Save current state
+        current_state = {
+            'frame_idx': self.cur_img_idx,
+            'dirty': self.dirty,
+            'file_path': self.file_path
+        }
+        
+        # Process propagation
+        frames_processed = self._process_propagation(source_shape, progress, current_state)
+        
+        # Close progress and restore state
+        progress.close()
+        self._restore_state(current_state)
+        
+        # Show completion message
+        self._show_completion_message(frames_processed)
+    
+    def _create_progress_dialog(self):
+        """Create and configure progress dialog."""
+        progress = QProgressDialog("連続ID付け処理中...", "キャンセル", 0, 
+                                 self.img_count - self.cur_img_idx - 1, self)
         progress.setWindowTitle("処理中")
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
         progress.setValue(0)
-        
-        # Save current state
-        current_frame_idx = self.cur_img_idx
-        current_dirty = self.dirty
-        
-        # Get source shape info
+        return progress
+    
+    def _process_propagation(self, source_shape, progress, current_state):
+        """Process label propagation to subsequent frames."""
         source_label = source_shape.label
-        source_bbox = [(p.x(), p.y()) for p in source_shape.points]
-        
-        # Create a temporary shape for tracking
         prev_shape = source_shape.copy()
         
-        # Process subsequent frames
-        frame_idx = current_frame_idx + 1
+        frame_idx = current_state['frame_idx'] + 1
         frames_processed = 0
+        
+        # Get image size once from current image (all frames should have same size)
+        image_size = None
+        if hasattr(self, 'image') and self.image and not self.image.isNull():
+            image_size = self.image.size()
+        
         while frame_idx < self.img_count:
             # Check if cancelled
             if progress.wasCanceled():
@@ -1827,175 +1849,441 @@ class MainWindow(QMainWindow, WindowMixin):
                 break
             
             # Update progress
-            progress.setValue(frame_idx - current_frame_idx)
+            progress.setValue(frame_idx - current_state['frame_idx'])
             progress.setLabelText(f"処理中: フレーム {frame_idx + 1}/{self.img_count}")
             QApplication.processEvents()
-            # Load the next frame's annotation file
+            # Load the next frame's annotation
             next_file = self.m_img_list[frame_idx]
-            basename = os.path.basename(os.path.splitext(next_file)[0])
+            annotation_paths = self._get_annotation_paths(next_file)
+            shapes_data = self._load_annotation_shapes_with_size(annotation_paths, next_file, image_size)
             
-            # Check for annotation files
-            annotation_found = False
-            shapes_data = None
-            
-            if self.default_save_dir:
-                xml_path = os.path.join(self.default_save_dir, basename + XML_EXT)
-                txt_path = os.path.join(self.default_save_dir, basename + TXT_EXT)
-                json_path = os.path.join(self.default_save_dir, basename + JSON_EXT)
-            else:
-                xml_path = os.path.splitext(next_file)[0] + XML_EXT
-                txt_path = os.path.splitext(next_file)[0] + TXT_EXT
-                json_path = os.path.splitext(next_file)[0] + JSON_EXT
-            
-            # Load shapes from annotation file
-            if os.path.isfile(xml_path):
-                from libs.pascal_voc_io import PascalVocReader
-                reader = PascalVocReader(xml_path)
-                shapes_data = reader.get_shapes()
-                annotation_found = True
-            elif os.path.isfile(txt_path):
-                # Load image for YOLO format conversion
-                if os.path.isfile(next_file):
-                    image = QImage()
-                    image.load(next_file)
-                    if not image.isNull():
-                        from libs.yolo_io import YoloReader
-                        reader = YoloReader(txt_path, image)
-                        shapes_data = reader.get_shapes()
-                        annotation_found = True
-                    else:
-                        print(f"[Propagate] Failed to load image at frame {frame_idx}")
-                        break
-                else:
-                    print(f"[Propagate] Image file not found at frame {frame_idx}")
-                    break
-            elif os.path.isfile(json_path):
-                from libs.create_ml_io import CreateMLReader
-                reader = CreateMLReader(json_path, next_file)
-                shapes_data = reader.get_shapes()
-                annotation_found = True
-            
-            if not annotation_found or not shapes_data:
+            if not shapes_data:
                 print(f"[Propagate] No annotation found at frame {frame_idx}, stopping")
                 break
             
             # Find matching shape in next frame
-            best_match_idx = -1
-            best_iou = 0.0
-            
-            for idx, shape_data in enumerate(shapes_data):
-                # shape_data is (label, points, line_color, fill_color, difficult)
-                points = shape_data[1]
-                
-                # Calculate IOU with prev_shape
-                curr_shape = Shape()
-                for x, y in points:
-                    curr_shape.add_point(QPointF(x, y))
-                
-                iou = self.tracker.calculate_iou(prev_shape, curr_shape)
-                if iou > best_iou and iou >= self.tracker.iou_threshold:
-                    best_iou = iou
-                    best_match_idx = idx
+            best_match_idx, best_iou = self._find_best_match(shapes_data, prev_shape)
             
             if best_match_idx >= 0:
                 # Update the matched shape's label
                 print(f"[Propagate] Found match at frame {frame_idx} with IOU {best_iou:.2f}")
-                
-                # Modify shapes_data
-                old_shape = shapes_data[best_match_idx]
-                new_shape = (source_label, old_shape[1], old_shape[2], old_shape[3], old_shape[4])
-                shapes_data[best_match_idx] = new_shape
+                shapes_data[best_match_idx] = self._update_shape_label(shapes_data[best_match_idx], source_label)
                 
                 # Save the updated annotation
-                # Determine file format
-                save_format = None
-                save_path = None
-                if os.path.isfile(xml_path):
-                    save_format = LabelFileFormat.PASCAL_VOC
-                    save_path = xml_path
-                elif os.path.isfile(txt_path):
-                    save_format = LabelFileFormat.YOLO
-                    save_path = txt_path
-                elif os.path.isfile(json_path):
-                    save_format = LabelFileFormat.CREATE_ML
-                    save_path = json_path
-                
-                if save_format and save_path:
-                    # Create shapes for saving
-                    temp_canvas_shapes = []
-                    for shape_data in shapes_data:
-                        label, points, line_color, fill_color, difficult = shape_data
-                        shape = Shape(label=label)
-                        for x, y in points:
-                            shape.add_point(QPointF(x, y))
-                        shape.difficult = difficult
-                        if line_color:
-                            shape.line_color = QColor(*line_color)
-                        else:
-                            shape.line_color = generate_color_by_text(label)
-                        if fill_color:
-                            shape.fill_color = QColor(*fill_color)
-                        else:
-                            shape.fill_color = generate_color_by_text(label)
-                        shape.close()
-                        temp_canvas_shapes.append(shape)
-                    
-                    # Save directly using label file
-                    temp_label_file = LabelFile()
-                    
-                    if save_format == LabelFileFormat.PASCAL_VOC:
-                        shapes_for_save = [dict(label=s.label,
-                                              line_color=s.line_color.getRgb(),
-                                              fill_color=s.fill_color.getRgb(),
-                                              points=[(p.x(), p.y()) for p in s.points],
-                                              difficult=s.difficult) for s in temp_canvas_shapes]
-                        temp_label_file.save_pascal_voc_format(save_path, shapes_for_save, next_file, None,
-                                                               self.line_color.getRgb(), self.fill_color.getRgb())
-                    elif save_format == LabelFileFormat.YOLO:
-                        # For YOLO, we need the image
-                        if os.path.isfile(next_file):
-                            image = QImage()
-                            image.load(next_file)
-                            if not image.isNull():
-                                image_data = read(next_file, None)
-                                shapes_for_save = [dict(label=s.label,
-                                                      line_color=s.line_color.getRgb(),
-                                                      fill_color=s.fill_color.getRgb(),
-                                                      points=[(p.x(), p.y()) for p in s.points],
-                                                      difficult=s.difficult) for s in temp_canvas_shapes]
-                                temp_label_file.save_yolo_format(save_path, shapes_for_save, next_file, image_data, self.label_hist,
-                                                               self.line_color.getRgb(), self.fill_color.getRgb())
-                    elif save_format == LabelFileFormat.CREATE_ML:
-                        shapes_for_save = [dict(label=s.label,
-                                              line_color=s.line_color.getRgb(),
-                                              fill_color=s.fill_color.getRgb(),
-                                              points=[(p.x(), p.y()) for p in s.points],
-                                              difficult=s.difficult) for s in temp_canvas_shapes]
-                        temp_label_file.save_create_ml_format(save_path, shapes_for_save, next_file, None,
-                                                             self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
-                    
-                    print(f"[Propagate] Saved updated annotation to {save_path}")
-                
-                # Update prev_shape for next iteration
-                prev_shape = temp_canvas_shapes[best_match_idx]
-                frames_processed += 1
+                if self._save_propagated_annotation_with_size(annotation_paths, shapes_data, next_file, image_size):
+                    # Update prev_shape for next iteration
+                    # Directly update prev_shape points without creating all shapes
+                    points = shapes_data[best_match_idx][1]
+                    prev_shape = Shape(label=source_label)
+                    for x, y in points:
+                        prev_shape.add_point(QPointF(x, y))
+                    prev_shape.close()
+                    frames_processed += 1
+                else:
+                    print(f"[Propagate] Failed to save annotation at frame {frame_idx}")
+                    break
                 
                 frame_idx += 1
             else:
                 print(f"[Propagate] No match found at frame {frame_idx}, stopping")
                 break
         
-        # Close progress dialog
-        progress.close()
+        return frames_processed
+    
+    def _get_annotation_paths(self, image_file):
+        """Get annotation file paths for given image file."""
+        basename = os.path.basename(os.path.splitext(image_file)[0])
         
-        # Restore original state
-        self.cur_img_idx = current_frame_idx
-        self.file_path = self.m_img_list[current_frame_idx] if current_frame_idx < self.img_count else None
-        self.dirty = current_dirty
+        if self.default_save_dir:
+            base_path = self.default_save_dir
+        else:
+            base_path = os.path.dirname(image_file)
         
+        return {
+            'xml': os.path.join(base_path, basename + XML_EXT),
+            'txt': os.path.join(base_path, basename + TXT_EXT),
+            'json': os.path.join(base_path, basename + JSON_EXT)
+        }
+    
+    def _load_annotation_shapes(self, annotation_paths, image_file):
+        """Load shapes from annotation file."""
+        # Try Pascal VOC format
+        if os.path.isfile(annotation_paths['xml']):
+            from libs.pascal_voc_io import PascalVocReader
+            reader = PascalVocReader(annotation_paths['xml'])
+            return reader.get_shapes()
+        
+        # Try YOLO format
+        elif os.path.isfile(annotation_paths['txt']):
+            if os.path.isfile(image_file):
+                image = QImage()
+                image.load(image_file)
+                if not image.isNull():
+                    from libs.yolo_io import YoloReader
+                    reader = YoloReader(annotation_paths['txt'], image)
+                    return reader.get_shapes()
+                else:
+                    print(f"[Propagate] Failed to load image: {image_file}")
+            else:
+                print(f"[Propagate] Image file not found: {image_file}")
+        
+        # Try CreateML format
+        elif os.path.isfile(annotation_paths['json']):
+            from libs.create_ml_io import CreateMLReader
+            reader = CreateMLReader(annotation_paths['json'], image_file)
+            return reader.get_shapes()
+        
+        return None
+    
+    def _load_annotation_shapes_with_size(self, annotation_paths, image_file, image_size):
+        """Load shapes from annotation file with pre-determined image size for YOLO."""
+        # Try Pascal VOC format
+        if os.path.isfile(annotation_paths['xml']):
+            from libs.pascal_voc_io import PascalVocReader
+            reader = PascalVocReader(annotation_paths['xml'])
+            return reader.get_shapes()
+        
+        # Try YOLO format with pre-determined size
+        elif os.path.isfile(annotation_paths['txt']):
+            if image_size and image_size.isValid():
+                # Create minimal QImage with the known size
+                minimal_image = QImage(image_size.width(), image_size.height(), QImage.Format_Mono)
+                from libs.yolo_io import YoloReader
+                reader = YoloReader(annotation_paths['txt'], minimal_image)
+                return reader.get_shapes()
+            else:
+                print(f"[Propagate] No valid image size available for YOLO format")
+                return None
+        
+        # Try CreateML format
+        elif os.path.isfile(annotation_paths['json']):
+            from libs.create_ml_io import CreateMLReader
+            reader = CreateMLReader(annotation_paths['json'], image_file)
+            return reader.get_shapes()
+        
+        return None
+    
+    def _load_annotation_shapes_with_cache(self, annotation_paths, image_file, image_cache):
+        """Load shapes from annotation file with image caching for YOLO."""
+        # Try Pascal VOC format
+        if os.path.isfile(annotation_paths['xml']):
+            from libs.pascal_voc_io import PascalVocReader
+            reader = PascalVocReader(annotation_paths['xml'])
+            return reader.get_shapes()
+        
+        # Try YOLO format with caching
+        elif os.path.isfile(annotation_paths['txt']):
+            if os.path.isfile(image_file):
+                # Check cache first
+                if image_file not in image_cache:
+                    image = QImage()
+                    image.load(image_file)
+                    if not image.isNull():
+                        image_cache[image_file] = image
+                    else:
+                        print(f"[Propagate] Failed to load image: {image_file}")
+                        return None
+                
+                if image_file in image_cache:
+                    from libs.yolo_io import YoloReader
+                    reader = YoloReader(annotation_paths['txt'], image_cache[image_file])
+                    return reader.get_shapes()
+            else:
+                print(f"[Propagate] Image file not found: {image_file}")
+        
+        # Try CreateML format
+        elif os.path.isfile(annotation_paths['json']):
+            from libs.create_ml_io import CreateMLReader
+            reader = CreateMLReader(annotation_paths['json'], image_file)
+            return reader.get_shapes()
+        
+        return None
+    
+    def _find_best_match(self, shapes_data, prev_shape):
+        """Find best matching shape using IOU."""
+        best_match_idx = -1
+        best_iou = 0.0
+        
+        # Early filtering based on bounding box size and position
+        prev_bbox = self._get_bbox_from_shape(prev_shape)
+        if not prev_bbox:
+            return -1, 0.0
+        
+        px1, py1, px2, py2 = prev_bbox
+        prev_width = px2 - px1
+        prev_height = py2 - py1
+        prev_center_x = (px1 + px2) / 2
+        prev_center_y = (py1 + py2) / 2
+        
+        for idx, shape_data in enumerate(shapes_data):
+            # shape_data is (label, points, line_color, fill_color, difficult)
+            points = shape_data[1]
+            
+            # Quick rejection based on bounding box
+            if len(points) >= 4:
+                x_coords = [p[0] for p in points]
+                y_coords = [p[1] for p in points]
+                x1, y1 = min(x_coords), min(y_coords)
+                x2, y2 = max(x_coords), max(y_coords)
+                
+                # Check if size difference is too large (>50% difference)
+                curr_width = x2 - x1
+                curr_height = y2 - y1
+                if (abs(curr_width - prev_width) / prev_width > 0.5 or 
+                    abs(curr_height - prev_height) / prev_height > 0.5):
+                    continue
+                
+                # Check if center distance is too large
+                curr_center_x = (x1 + x2) / 2
+                curr_center_y = (y1 + y2) / 2
+                center_dist = ((curr_center_x - prev_center_x) ** 2 + 
+                              (curr_center_y - prev_center_y) ** 2) ** 0.5
+                if center_dist > max(prev_width, prev_height):
+                    continue
+            
+            # Only calculate IOU for candidates that pass quick checks
+            curr_shape = Shape()
+            for x, y in points:
+                curr_shape.add_point(QPointF(x, y))
+            
+            iou = self.tracker.calculate_iou(prev_shape, curr_shape)
+            if iou > best_iou and iou >= self.tracker.iou_threshold:
+                best_iou = iou
+                best_match_idx = idx
+        
+        return best_match_idx, best_iou
+    
+    def _get_bbox_from_shape(self, shape):
+        """Extract bounding box from shape."""
+        if not hasattr(shape, 'points') or len(shape.points) < 2:
+            return None
+        
+        x_coords = [p.x() for p in shape.points]
+        y_coords = [p.y() for p in shape.points]
+        
+        return (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
+    
+    def _update_shape_label(self, shape_data, new_label):
+        """Update shape data with new label."""
+        # shape_data is (label, points, line_color, fill_color, difficult)
+        return (new_label, shape_data[1], shape_data[2], shape_data[3], shape_data[4])
+    
+    def _create_shapes_from_data(self, shapes_data):
+        """Create Shape objects from shape data."""
+        shapes = []
+        for shape_data in shapes_data:
+            label, points, line_color, fill_color, difficult = shape_data
+            shape = Shape(label=label)
+            for x, y in points:
+                shape.add_point(QPointF(x, y))
+            shape.difficult = difficult
+            
+            if line_color:
+                shape.line_color = QColor(*line_color)
+            else:
+                shape.line_color = generate_color_by_text(label)
+            
+            if fill_color:
+                shape.fill_color = QColor(*fill_color)
+            else:
+                shape.fill_color = generate_color_by_text(label)
+            
+            shape.close()
+            shapes.append(shape)
+        return shapes
+    
+    def _save_propagated_annotation(self, annotation_paths, shapes_data, image_file):
+        """Save propagated annotation to file."""
+        # Determine which format to save
+        save_format = None
+        save_path = None
+        
+        if os.path.isfile(annotation_paths['xml']):
+            save_format = LabelFileFormat.PASCAL_VOC
+            save_path = annotation_paths['xml']
+        elif os.path.isfile(annotation_paths['txt']):
+            save_format = LabelFileFormat.YOLO
+            save_path = annotation_paths['txt']
+        elif os.path.isfile(annotation_paths['json']):
+            save_format = LabelFileFormat.CREATE_ML
+            save_path = annotation_paths['json']
+        
+        if not save_format or not save_path:
+            return False
+        
+        # Create shapes for saving
+        shapes = self._create_shapes_from_data(shapes_data)
+        shapes_for_save = [self._format_shape_for_save(s) for s in shapes]
+        
+        # Save using appropriate format
+        temp_label_file = LabelFile()
+        try:
+            if save_format == LabelFileFormat.PASCAL_VOC:
+                temp_label_file.save_pascal_voc_format(save_path, shapes_for_save, image_file, None,
+                                                      self.line_color.getRgb(), self.fill_color.getRgb())
+            elif save_format == LabelFileFormat.YOLO:
+                # For YOLO, we need the image
+                image_data = read(image_file, None)
+                if image_data:
+                    temp_label_file.save_yolo_format(save_path, shapes_for_save, image_file, image_data, 
+                                                   self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+                else:
+                    return False
+            elif save_format == LabelFileFormat.CREATE_ML:
+                temp_label_file.save_create_ml_format(save_path, shapes_for_save, image_file, None,
+                                                     self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+            
+            print(f"[Propagate] Saved updated annotation to {save_path}")
+            return True
+        except Exception as e:
+            print(f"[Propagate] Error saving annotation: {str(e)}")
+            return False
+    
+    def _save_propagated_annotation_with_size(self, annotation_paths, shapes_data, image_file, image_size):
+        """Save propagated annotation to file with pre-determined image size."""
+        # Determine which format to save
+        save_format = None
+        save_path = None
+        
+        if os.path.isfile(annotation_paths['xml']):
+            save_format = LabelFileFormat.PASCAL_VOC
+            save_path = annotation_paths['xml']
+        elif os.path.isfile(annotation_paths['txt']):
+            save_format = LabelFileFormat.YOLO
+            save_path = annotation_paths['txt']
+        elif os.path.isfile(annotation_paths['json']):
+            save_format = LabelFileFormat.CREATE_ML
+            save_path = annotation_paths['json']
+        
+        if not save_format or not save_path:
+            return False
+        
+        # Create shapes for saving only once
+        shapes_for_save = []
+        for shape_data in shapes_data:
+            label, points, line_color, fill_color, difficult = shape_data
+            shapes_for_save.append({
+                'label': label,
+                'points': points,
+                'line_color': line_color or generate_color_by_text(label).getRgb(),
+                'fill_color': fill_color or generate_color_by_text(label).getRgb(),
+                'difficult': difficult
+            })
+        
+        # Save using appropriate format
+        temp_label_file = LabelFile()
+        try:
+            if save_format == LabelFileFormat.PASCAL_VOC:
+                temp_label_file.save_pascal_voc_format(save_path, shapes_for_save, image_file, None,
+                                                      self.line_color.getRgb(), self.fill_color.getRgb())
+            elif save_format == LabelFileFormat.YOLO:
+                # For YOLO, create minimal image data with known size
+                if image_size and image_size.isValid():
+                    # Create minimal image for YOLO format
+                    minimal_image = QImage(image_size.width(), image_size.height(), QImage.Format_Mono)
+                    buffer = QByteArray()
+                    buffer_io = QBuffer(buffer)
+                    buffer_io.open(QIODevice.WriteOnly)
+                    minimal_image.save(buffer_io, "PNG")
+                    image_data = buffer.data()
+                    
+                    temp_label_file.save_yolo_format(save_path, shapes_for_save, image_file, image_data, 
+                                                   self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+                else:
+                    print(f"[Propagate] Cannot save YOLO format without image size")
+                    return False
+            elif save_format == LabelFileFormat.CREATE_ML:
+                temp_label_file.save_create_ml_format(save_path, shapes_for_save, image_file, None,
+                                                     self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+            
+            return True
+        except Exception as e:
+            print(f"[Propagate] Error saving annotation: {str(e)}")
+            return False
+    
+    def _save_propagated_annotation_with_cache(self, annotation_paths, shapes_data, image_file, image_cache):
+        """Save propagated annotation to file with image cache."""
+        # Determine which format to save
+        save_format = None
+        save_path = None
+        
+        if os.path.isfile(annotation_paths['xml']):
+            save_format = LabelFileFormat.PASCAL_VOC
+            save_path = annotation_paths['xml']
+        elif os.path.isfile(annotation_paths['txt']):
+            save_format = LabelFileFormat.YOLO
+            save_path = annotation_paths['txt']
+        elif os.path.isfile(annotation_paths['json']):
+            save_format = LabelFileFormat.CREATE_ML
+            save_path = annotation_paths['json']
+        
+        if not save_format or not save_path:
+            return False
+        
+        # Create shapes for saving only once
+        shapes_for_save = []
+        for shape_data in shapes_data:
+            label, points, line_color, fill_color, difficult = shape_data
+            shapes_for_save.append({
+                'label': label,
+                'points': points,
+                'line_color': line_color or generate_color_by_text(label).getRgb(),
+                'fill_color': fill_color or generate_color_by_text(label).getRgb(),
+                'difficult': difficult
+            })
+        
+        # Save using appropriate format
+        temp_label_file = LabelFile()
+        try:
+            if save_format == LabelFileFormat.PASCAL_VOC:
+                temp_label_file.save_pascal_voc_format(save_path, shapes_for_save, image_file, None,
+                                                      self.line_color.getRgb(), self.fill_color.getRgb())
+            elif save_format == LabelFileFormat.YOLO:
+                # Use cached image if available
+                if image_file in image_cache:
+                    # Convert QImage to bytes for saving
+                    buffer = QByteArray()
+                    buffer_io = QBuffer(buffer)
+                    buffer_io.open(QIODevice.WriteOnly)
+                    image_cache[image_file].save(buffer_io, "PNG")
+                    image_data = buffer.data()
+                else:
+                    image_data = read(image_file, None)
+                
+                if image_data:
+                    temp_label_file.save_yolo_format(save_path, shapes_for_save, image_file, image_data, 
+                                                   self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+                else:
+                    return False
+            elif save_format == LabelFileFormat.CREATE_ML:
+                temp_label_file.save_create_ml_format(save_path, shapes_for_save, image_file, None,
+                                                     self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+            
+            return True
+        except Exception as e:
+            print(f"[Propagate] Error saving annotation: {str(e)}")
+            return False
+    
+    def _format_shape_for_save(self, shape):
+        """Format shape object for saving."""
+        return dict(
+            label=shape.label,
+            line_color=shape.line_color.getRgb(),
+            fill_color=shape.fill_color.getRgb(),
+            points=[(p.x(), p.y()) for p in shape.points],
+            difficult=shape.difficult
+        )
+    
+    def _restore_state(self, state):
+        """Restore application state."""
+        self.cur_img_idx = state['frame_idx']
+        self.file_path = state['file_path']
+        self.dirty = state['dirty']
+    
+    def _show_completion_message(self, frames_processed):
+        """Show completion message in status bar."""
         print(f"[Propagate] Completed. Propagated to {frames_processed} frames")
         
-        # Show completion message in status bar
         if frames_processed > 0:
             self.statusBar().showMessage(f'連続ID付けが完了しました。{frames_processed}フレームに伝播しました。', 3000)
         else:
