@@ -207,7 +207,7 @@ class MainWindow(QMainWindow, WindowMixin):
         bb_dup_layout.addWidget(frame_count_container)
         
         # Overwrite option checkbox
-        self.bb_dup_overwrite_checkbox = QCheckBox("重複時に上書き (IOU>0.8)")
+        self.bb_dup_overwrite_checkbox = QCheckBox("重複時に上書き (IOU>0.6)")
         self.bb_dup_overwrite_checkbox.setChecked(False)
         self.bb_dup_overwrite_checkbox.setEnabled(False)
         self.bb_dup_overwrite_checkbox.setContentsMargins(20, 0, 0, 0)
@@ -1919,7 +1919,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 if len(source_shape.points) == 4 and len(existing_shape.points) == 4:
                     iou = self.calculate_iou(source_shape.points, existing_shape.points)
                     print(f"[BB Duplication] Checking IOU with existing shape: {iou:.3f}")
-                    if iou >= 0.8:
+                    if iou >= 0.6:
                         if overwrite_mode:
                             # Mark shape for removal
                             shape_to_remove = existing_shape
