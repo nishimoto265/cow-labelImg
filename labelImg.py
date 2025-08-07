@@ -1834,11 +1834,16 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def calculate_iou(self, box1, box2):
         """Calculate Intersection over Union between two bounding boxes."""
-        # Get coordinates
-        x1_min, y1_min = box1[0].x(), box1[0].y()
-        x1_max, y1_max = box1[2].x(), box1[2].y()
-        x2_min, y2_min = box2[0].x(), box2[0].y()
-        x2_max, y2_max = box2[2].x(), box2[2].y()
+        # Get coordinates from all points to find bounding box
+        x1_coords = [p.x() for p in box1]
+        y1_coords = [p.y() for p in box1]
+        x2_coords = [p.x() for p in box2]
+        y2_coords = [p.y() for p in box2]
+        
+        x1_min, x1_max = min(x1_coords), max(x1_coords)
+        y1_min, y1_max = min(y1_coords), max(y1_coords)
+        x2_min, x2_max = min(x2_coords), max(x2_coords)
+        y2_min, y2_max = min(y2_coords), max(y2_coords)
         
         # Calculate intersection area
         inter_x_min = max(x1_min, x2_min)
@@ -1867,15 +1872,18 @@ class MainWindow(QMainWindow, WindowMixin):
             return
         
         print(f"[BB Duplication] Starting BB duplication from frame {self.cur_img_idx}")
+        print(f"[BB Duplication] Source shape points: {[(p.x(), p.y()) for p in source_shape.points]}")
         
         # Get number of frames to duplicate to
         num_frames = self.bb_dup_frame_count.value()
         overwrite_mode = self.bb_dup_overwrite_checkbox.isChecked()
         
-        # Save current state
+        # Save current state - we need to save the file first to ensure current BB is saved
+        if self.auto_saving.isChecked() and self.default_save_dir:
+            self.save_file()
+        
         current_file = self.file_path
         current_idx = self.cur_img_idx
-        current_shapes = self.canvas.shapes[:]
         
         frames_processed = 0
         frames_with_conflicts = 0
@@ -1907,18 +1915,21 @@ class MainWindow(QMainWindow, WindowMixin):
             should_add_shape = True
             
             for existing_shape in self.canvas.shapes:
-                iou = self.calculate_iou(source_shape.points, existing_shape.points)
-                if iou >= 0.8:
-                    if overwrite_mode:
-                        # Mark shape for removal
-                        shape_to_remove = existing_shape
-                        print(f"[BB Duplication] Frame {target_idx}: Overwriting existing BB (IOU={iou:.2f})")
-                    else:
-                        # Skip this frame
-                        should_add_shape = False
-                        frames_with_conflicts += 1
-                        print(f"[BB Duplication] Frame {target_idx}: Skipping due to overlap (IOU={iou:.2f})")
-                    break
+                # Only check IoU if both shapes have 4 points (rectangles)
+                if len(source_shape.points) == 4 and len(existing_shape.points) == 4:
+                    iou = self.calculate_iou(source_shape.points, existing_shape.points)
+                    print(f"[BB Duplication] Checking IOU with existing shape: {iou:.3f}")
+                    if iou >= 0.8:
+                        if overwrite_mode:
+                            # Mark shape for removal
+                            shape_to_remove = existing_shape
+                            print(f"[BB Duplication] Frame {target_idx}: Overwriting existing BB (IOU={iou:.2f})")
+                        else:
+                            # Skip this frame
+                            should_add_shape = False
+                            frames_with_conflicts += 1
+                            print(f"[BB Duplication] Frame {target_idx}: Skipping due to overlap (IOU={iou:.2f})")
+                        break
             
             # Remove overlapping shape if in overwrite mode
             if shape_to_remove:
