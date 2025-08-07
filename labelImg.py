@@ -130,6 +130,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.tracker = Tracker()
         self.prev_frame_shapes = []
         
+        # Initialize BB duplication feature
+        self.bb_duplication_mode = False
+        
         # Initialize click-to-change-label mode
         self.click_change_label_mode = False
         self._applying_label = False
@@ -171,6 +174,46 @@ class MainWindow(QMainWindow, WindowMixin):
         self.click_change_label_checkbox.setChecked(False)
         self.click_change_label_checkbox.stateChanged.connect(self.toggle_click_change_label)
         list_layout.addWidget(self.click_change_label_checkbox)
+        
+        # Create BB duplication feature container
+        bb_dup_container = QWidget()
+        bb_dup_layout = QVBoxLayout()
+        bb_dup_layout.setContentsMargins(0, 0, 0, 0)
+        bb_dup_container.setLayout(bb_dup_layout)
+        
+        # BB duplication checkbox
+        self.bb_duplication_checkbox = QCheckBox("BB複製モード")
+        self.bb_duplication_checkbox.setChecked(False)
+        self.bb_duplication_checkbox.stateChanged.connect(self.toggle_bb_duplication)
+        bb_dup_layout.addWidget(self.bb_duplication_checkbox)
+        
+        # Frame count for duplication
+        frame_count_container = QWidget()
+        frame_count_layout = QHBoxLayout()
+        frame_count_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+        frame_count_container.setLayout(frame_count_layout)
+        
+        frame_count_label = QLabel("後続フレーム数:")
+        self.bb_dup_frame_count = QSpinBox()
+        self.bb_dup_frame_count.setMinimum(1)
+        self.bb_dup_frame_count.setMaximum(100)
+        self.bb_dup_frame_count.setValue(5)
+        self.bb_dup_frame_count.setMaximumWidth(60)
+        self.bb_dup_frame_count.setEnabled(False)
+        
+        frame_count_layout.addWidget(frame_count_label)
+        frame_count_layout.addWidget(self.bb_dup_frame_count)
+        frame_count_layout.addStretch()
+        bb_dup_layout.addWidget(frame_count_container)
+        
+        # Overwrite option checkbox
+        self.bb_dup_overwrite_checkbox = QCheckBox("重複時に上書き (IOU>0.8)")
+        self.bb_dup_overwrite_checkbox.setChecked(False)
+        self.bb_dup_overwrite_checkbox.setEnabled(False)
+        self.bb_dup_overwrite_checkbox.setContentsMargins(20, 0, 0, 0)
+        bb_dup_layout.addWidget(self.bb_dup_overwrite_checkbox)
+        
+        list_layout.addWidget(bb_dup_container)
 
         # Create and add combobox for showing unique labels in group
         self.combo_box = ComboBox(self)
@@ -1024,6 +1067,10 @@ class MainWindow(QMainWindow, WindowMixin):
 
             if text not in self.label_hist:
                 self.label_hist.append(text)
+            
+            # Apply BB duplication if enabled
+            if self.bb_duplication_mode:
+                self.duplicate_bb_to_subsequent_frames(shape)
         else:
             # self.canvas.undoLastLine()
             self.canvas.reset_all_lines()
@@ -1778,6 +1825,148 @@ class MainWindow(QMainWindow, WindowMixin):
     def toggle_click_change_label(self, state):
         """Toggle click-to-change-label mode."""
         self.click_change_label_mode = (state == Qt.Checked)
+    
+    def toggle_bb_duplication(self, state):
+        """Toggle BB duplication mode."""
+        self.bb_duplication_mode = (state == Qt.Checked)
+        self.bb_dup_frame_count.setEnabled(self.bb_duplication_mode)
+        self.bb_dup_overwrite_checkbox.setEnabled(self.bb_duplication_mode)
+    
+    def calculate_iou(self, box1, box2):
+        """Calculate Intersection over Union between two bounding boxes."""
+        # Get coordinates
+        x1_min, y1_min = box1[0].x(), box1[0].y()
+        x1_max, y1_max = box1[2].x(), box1[2].y()
+        x2_min, y2_min = box2[0].x(), box2[0].y()
+        x2_max, y2_max = box2[2].x(), box2[2].y()
+        
+        # Calculate intersection area
+        inter_x_min = max(x1_min, x2_min)
+        inter_y_min = max(y1_min, y2_min)
+        inter_x_max = min(x1_max, x2_max)
+        inter_y_max = min(y1_max, y2_max)
+        
+        if inter_x_max < inter_x_min or inter_y_max < inter_y_min:
+            return 0.0
+        
+        inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
+        
+        # Calculate union area
+        box1_area = (x1_max - x1_min) * (y1_max - y1_min)
+        box2_area = (x2_max - x2_min) * (y2_max - y2_min)
+        union_area = box1_area + box2_area - inter_area
+        
+        if union_area == 0:
+            return 0.0
+        
+        return inter_area / union_area
+    
+    def duplicate_bb_to_subsequent_frames(self, source_shape):
+        """Duplicate bounding box to subsequent frames."""
+        if not self.bb_duplication_mode or not source_shape:
+            return
+        
+        print(f"[BB Duplication] Starting BB duplication from frame {self.cur_img_idx}")
+        
+        # Get number of frames to duplicate to
+        num_frames = self.bb_dup_frame_count.value()
+        overwrite_mode = self.bb_dup_overwrite_checkbox.isChecked()
+        
+        # Save current state
+        current_file = self.file_path
+        current_idx = self.cur_img_idx
+        current_shapes = self.canvas.shapes[:]
+        
+        frames_processed = 0
+        frames_with_conflicts = 0
+        
+        # Create progress dialog
+        progress = QProgressDialog("BB複製処理中...", "キャンセル", 0, num_frames, self)
+        progress.setWindowTitle("処理中")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        
+        for i in range(1, num_frames + 1):
+            if progress.wasCanceled():
+                break
+            
+            target_idx = current_idx + i
+            if target_idx >= self.img_count:
+                break
+            
+            progress.setValue(i)
+            progress.setLabelText(f"フレーム {target_idx + 1}/{self.img_count} を処理中...")
+            
+            # Load target frame
+            target_file = self.m_img_list[target_idx]
+            self.load_file(target_file, preserve_zoom=True)
+            
+            # Check for overlapping shapes
+            shape_to_remove = None
+            should_add_shape = True
+            
+            for existing_shape in self.canvas.shapes:
+                iou = self.calculate_iou(source_shape.points, existing_shape.points)
+                if iou >= 0.8:
+                    if overwrite_mode:
+                        # Mark shape for removal
+                        shape_to_remove = existing_shape
+                        print(f"[BB Duplication] Frame {target_idx}: Overwriting existing BB (IOU={iou:.2f})")
+                    else:
+                        # Skip this frame
+                        should_add_shape = False
+                        frames_with_conflicts += 1
+                        print(f"[BB Duplication] Frame {target_idx}: Skipping due to overlap (IOU={iou:.2f})")
+                    break
+            
+            # Remove overlapping shape if in overwrite mode
+            if shape_to_remove:
+                # Remove shape from canvas
+                self.canvas.shapes.remove(shape_to_remove)
+                # Remove from label list
+                for i in range(self.label_list.count()):
+                    item = self.label_list.item(i)
+                    if item and item in self.shapes_to_items:
+                        if self.shapes_to_items[item] == shape_to_remove:
+                            self.label_list.takeItem(i)
+                            del self.items_to_shapes[item]
+                            del self.shapes_to_items[shape_to_remove]
+                            break
+            
+            # Add duplicated shape
+            if should_add_shape:
+                # Create new shape with same properties
+                new_shape = Shape()
+                new_shape.label = source_shape.label
+                new_shape.points = source_shape.points[:]
+                new_shape.close()
+                new_shape.difficult = source_shape.difficult if hasattr(source_shape, 'difficult') else False
+                new_shape.line_color = source_shape.line_color
+                new_shape.fill_color = source_shape.fill_color
+                new_shape.paint_label = self.display_label_option.isChecked()
+                
+                # Add shape to canvas and label list
+                self.canvas.shapes.append(new_shape)
+                self.add_label(new_shape)
+                self.set_dirty()
+                frames_processed += 1
+                
+                # Save the file
+                if self.auto_saving.isChecked() and self.default_save_dir:
+                    self.save_file()
+        
+        progress.close()
+        
+        # Return to original frame
+        self.load_file(current_file, preserve_zoom=True)
+        
+        # Show status message
+        message = f"BB複製が完了しました。{frames_processed}フレームに複製"
+        if frames_with_conflicts > 0:
+            message += f"、{frames_with_conflicts}フレームをスキップ"
+        message += "しました。"
+        self.statusBar().showMessage(message, 5000)
     
     def on_shape_clicked(self):
         """Handle shape click event for label change."""
