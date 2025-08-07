@@ -13,6 +13,7 @@ try:
     from PyQt5.QtGui import *
     from PyQt5.QtCore import *
     from PyQt5.QtWidgets import *
+    from PyQt5.QtCore import QTimer
 except ImportError:
     # needed for py3+qt4
     # Ref:
@@ -23,6 +24,7 @@ except ImportError:
         sip.setapi('QVariant', 2)
     from PyQt4.QtGui import *
     from PyQt4.QtCore import *
+    from PyQt4.QtCore import QTimer
 
 from libs.combobox import ComboBox
 from libs.default_label_combobox import DefaultLabelComboBox
@@ -1122,12 +1124,23 @@ class MainWindow(QMainWindow, WindowMixin):
         for item, shape in self.items_to_shapes.items():
             item.setCheckState(Qt.Checked if value else Qt.Unchecked)
 
-    def load_file(self, file_path=None, clear_prev_shapes=False):
+    def load_file(self, file_path=None, clear_prev_shapes=False, preserve_zoom=False):
         """Load the specified file, or the last opened file if None."""
         # Save tracking info before reset
         temp_prev_shapes = self.prev_frame_shapes if hasattr(self, 'prev_frame_shapes') and not clear_prev_shapes else []
         temp_tracking_mode = self.continuous_tracking_mode if hasattr(self, 'continuous_tracking_mode') else False
         temp_next_track_id = self.tracker.next_track_id if hasattr(self, 'tracker') else 1
+        
+        # Save zoom state before reset if requested
+        if preserve_zoom and hasattr(self, 'zoom_widget'):
+            saved_zoom_value = self.zoom_widget.value()
+            saved_zoom_mode = self.zoom_mode
+            saved_h_scroll = self.scroll_bars[Qt.Horizontal].value()
+            saved_v_scroll = self.scroll_bars[Qt.Vertical].value()
+            saved_h_max = self.scroll_bars[Qt.Horizontal].maximum()
+            saved_v_max = self.scroll_bars[Qt.Vertical].maximum()
+        else:
+            saved_zoom_value = None
         
         self.reset_state()
         
@@ -1197,8 +1210,19 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.load_labels(self.label_file.shapes)
             self.set_clean()
             self.canvas.setEnabled(True)
-            self.adjust_scale(initial=True)
-            self.paint_canvas()
+            
+            # Restore zoom state if requested, otherwise use initial scale
+            if preserve_zoom and saved_zoom_value is not None:
+                self.zoom_mode = saved_zoom_mode
+                self.zoom_widget.setValue(saved_zoom_value)
+                self.paint_canvas()
+                # Restore scroll positions after a brief delay to ensure proper layout
+                QTimer.singleShot(50, lambda: self.restore_scroll_positions(
+                    saved_h_scroll, saved_v_scroll, saved_h_max, saved_v_max))
+            else:
+                self.adjust_scale(initial=True)
+                self.paint_canvas()
+            
             self.add_recent_file(self.file_path)
             self.toggle_actions(True)
             self.show_bounding_box_from_annotation_file(self.file_path)
@@ -1286,6 +1310,22 @@ class MainWindow(QMainWindow, WindowMixin):
         # The epsilon does not seem to work too well here.
         w = self.centralWidget().width() - 2.0
         return w / self.canvas.pixmap.width()
+    
+    def restore_scroll_positions(self, h_value, v_value, prev_h_max, prev_v_max):
+        """Restore scroll positions after loading a new image."""
+        h_bar = self.scroll_bars[Qt.Horizontal]
+        v_bar = self.scroll_bars[Qt.Vertical]
+        
+        # Calculate the relative position from the previous state
+        if prev_h_max > 0:
+            h_ratio = h_value / prev_h_max if prev_h_max > 0 else 0
+            new_h_value = int(h_ratio * h_bar.maximum())
+            h_bar.setValue(new_h_value)
+        
+        if prev_v_max > 0:
+            v_ratio = v_value / prev_v_max if prev_v_max > 0 else 0
+            new_v_value = int(v_ratio * v_bar.maximum())
+            v_bar.setValue(new_v_value)
 
     def closeEvent(self, event):
         if not self.may_continue():
@@ -1463,9 +1503,9 @@ class MainWindow(QMainWindow, WindowMixin):
             self.cur_img_idx -= 1
             filename = self.m_img_list[self.cur_img_idx]
             if filename:
-                # When going to previous frame, load with clear_prev_shapes=True
+                # When going to previous frame, load with clear_prev_shapes=True and preserve_zoom=True
                 print(f"[Navigation] Going to previous frame {self.cur_img_idx}")
-                self.load_file(filename, clear_prev_shapes=True)
+                self.load_file(filename, clear_prev_shapes=True, preserve_zoom=True)
 
     def open_next_image(self, _value=False):
         # Proceeding next image without dialog if having any label
@@ -1496,8 +1536,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 filename = self.m_img_list[self.cur_img_idx]
 
         if filename:
-            # Just load the file normally
-            self.load_file(filename)
+            # Just load the file normally with preserve_zoom=True
+            self.load_file(filename, preserve_zoom=True)
 
     def open_file(self, _value=False):
         if not self.may_continue():
