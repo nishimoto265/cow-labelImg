@@ -41,6 +41,7 @@ from libs.labelDialog import LabelDialog
 from libs.colorDialog import ColorDialog
 from libs.labelFile import LabelFile, LabelFileError, LabelFileFormat
 from libs.toolBar import ToolBar
+from libs.undo_manager import FrameUndoManager
 from libs.pascal_voc_io import PascalVocReader
 from libs.pascal_voc_io import XML_EXT
 from libs.yolo_io import YoloReader
@@ -136,6 +137,10 @@ class MainWindow(QMainWindow, WindowMixin):
         # Initialize click-to-change-label mode
         self.click_change_label_mode = False
         self._applying_label = False
+        
+        # Initialize Undo/Redo manager
+        self.undo_manager = FrameUndoManager(max_history_per_frame=30)
+        print("[Main] Undo/Redo manager initialized")
 
         list_layout = QVBoxLayout()
         list_layout.setContentsMargins(0, 0, 0, 0)
@@ -206,12 +211,36 @@ class MainWindow(QMainWindow, WindowMixin):
         frame_count_layout.addStretch()
         bb_dup_layout.addWidget(frame_count_container)
         
+        # IOU threshold setting
+        iou_threshold_container = QWidget()
+        iou_threshold_layout = QHBoxLayout()
+        iou_threshold_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+        iou_threshold_container.setLayout(iou_threshold_layout)
+        
+        iou_threshold_label = QLabel("IOUしきい値:")
+        self.bb_dup_iou_threshold = QDoubleSpinBox()
+        self.bb_dup_iou_threshold.setMinimum(0.1)
+        self.bb_dup_iou_threshold.setMaximum(1.0)
+        self.bb_dup_iou_threshold.setSingleStep(0.05)
+        self.bb_dup_iou_threshold.setValue(0.6)
+        self.bb_dup_iou_threshold.setMaximumWidth(80)
+        self.bb_dup_iou_threshold.setEnabled(False)
+        self.bb_dup_iou_threshold.valueChanged.connect(self.update_overwrite_checkbox_text)
+        
+        iou_threshold_layout.addWidget(iou_threshold_label)
+        iou_threshold_layout.addWidget(self.bb_dup_iou_threshold)
+        iou_threshold_layout.addStretch()
+        bb_dup_layout.addWidget(iou_threshold_container)
+        
         # Overwrite option checkbox
         self.bb_dup_overwrite_checkbox = QCheckBox("重複時に上書き (IOU>0.6)")
         self.bb_dup_overwrite_checkbox.setChecked(False)
         self.bb_dup_overwrite_checkbox.setEnabled(False)
         self.bb_dup_overwrite_checkbox.setContentsMargins(20, 0, 0, 0)
         bb_dup_layout.addWidget(self.bb_dup_overwrite_checkbox)
+        
+        # Initialize checkbox text with current IOU threshold
+        self.update_overwrite_checkbox_text()
         
         list_layout.addWidget(bb_dup_container)
 
@@ -303,6 +332,12 @@ class MainWindow(QMainWindow, WindowMixin):
 
         open_prev_image = action(get_str('prevImg'), self.open_prev_image,
                                  'a', 'prev', get_str('prevImgDetail'))
+        
+        # Undo/Redo actions
+        undo = action('Undo', self.undo_action,
+                     'Ctrl+Z', 'undo', 'Undo last action')
+        redo = action('Redo', self.redo_action,
+                     'Ctrl+Y', 'redo', 'Redo last action')
 
         verify = action(get_str('verifyImg'), self.verify_image,
                         'space', 'verify', get_str('verifyImgDetail'))
@@ -449,6 +484,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Store actions for further handling.
         self.actions = Struct(save=save, save_format=save_format, saveAs=save_as, open=open, close=close, resetAll=reset_all, deleteImg=delete_image,
+                              undo=undo, redo=redo,
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
                               createMode=create_mode, editMode=edit_mode, advancedMode=advanced_mode,
                               shapeLineColor=shape_line_color, shapeFillColor=shape_fill_color,
@@ -494,6 +530,10 @@ class MainWindow(QMainWindow, WindowMixin):
         self.display_label_option.setChecked(settings.get(SETTING_PAINT_LABEL, False))
         self.display_label_option.triggered.connect(self.toggle_paint_labels_option)
 
+        # Add Edit menu
+        self.menus.edit = QMenu('Edit', self)
+        add_actions(self.menus.edit, (undo, redo))
+        
         add_actions(self.menus.file,
                     (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image, quit))
         add_actions(self.menus.help, (help_default, show_info, show_shortcut))
@@ -995,6 +1035,9 @@ class MainWindow(QMainWindow, WindowMixin):
             return False
 
     def copy_selected_shape(self):
+        # Save state before copying
+        self.save_undo_state("copy_shape")
+        
         self.add_label(self.canvas.copy_selected_shape())
         # fix copy and delete
         self.shape_selection_changed(True)
@@ -1054,6 +1097,9 @@ class MainWindow(QMainWindow, WindowMixin):
         # Add Chris
         self.diffc_button.setChecked(False)
         if text is not None:
+            # Save state before adding new shape
+            self.save_undo_state("add_shape")
+            
             self.prev_label_text = text
             generate_color = generate_color_by_text(text)
             shape = self.canvas.set_last_label(text, generate_color, generate_color)
@@ -1284,6 +1330,12 @@ class MainWindow(QMainWindow, WindowMixin):
             #     self.label_list.item(self.label_list.count() - 1).setSelected(True)
 
             self.canvas.setFocus(True)
+            
+            # Initialize undo manager for this file
+            self.undo_manager.set_current_frame(self.file_path)
+            initial_state = self.get_current_state()
+            self.undo_manager.get_manager(self.file_path).initialize_with_state(initial_state)
+            
             return True
         return False
 
@@ -1708,6 +1760,9 @@ class MainWindow(QMainWindow, WindowMixin):
             self.set_dirty()
 
     def delete_selected_shape(self):
+        # Save state before deletion
+        self.save_undo_state("delete_shape")
+        
         self.remove_label(self.canvas.delete_selected())
         self.set_dirty()
         if self.no_shapes():
@@ -1802,6 +1857,151 @@ class MainWindow(QMainWindow, WindowMixin):
         for shape in self.canvas.shapes:
             shape.paint_label = self.display_label_option.isChecked()
 
+    # ==================== Undo/Redo Methods ====================
+    
+    def get_current_state(self):
+        """現在の状態を取得（shapes情報）"""
+        state = {
+            'file_path': self.file_path,
+            'shapes': []
+        }
+        
+        for shape in self.canvas.shapes:
+            shape_data = {
+                'label': shape.label,
+                'points': [(p.x(), p.y()) for p in shape.points],
+                'difficult': getattr(shape, 'difficult', False),
+                'paint_label': getattr(shape, 'paint_label', False),
+            }
+            # Track IDがあれば保存
+            if hasattr(shape, 'track_id'):
+                shape_data['track_id'] = shape.track_id
+            if hasattr(shape, 'is_tracked'):
+                shape_data['is_tracked'] = shape.is_tracked
+            state['shapes'].append(shape_data)
+        
+        return state
+    
+    def restore_state(self, state):
+        """状態を復元"""
+        if not state:
+            return
+        
+        # 復元中フラグをセット
+        self.undo_manager.get_manager(self.file_path).set_restoring(True)
+        
+        try:
+            # 現在のshapesをクリア
+            self.canvas.shapes = []
+            self.label_list.clear()
+            self.items_to_shapes.clear()
+            self.shapes_to_items.clear()
+            
+            # shapesを復元
+            for shape_data in state.get('shapes', []):
+                shape = Shape()
+                shape.label = shape_data['label']
+                shape.points = [QPointF(x, y) for x, y in shape_data['points']]
+                shape.close()
+                shape.difficult = shape_data.get('difficult', False)
+                shape.paint_label = shape_data.get('paint_label', self.display_label_option.isChecked())
+                
+                # Track IDを復元
+                if 'track_id' in shape_data:
+                    shape.track_id = shape_data['track_id']
+                if 'is_tracked' in shape_data:
+                    shape.is_tracked = shape_data['is_tracked']
+                
+                # 色を設定
+                shape.line_color = generate_color_by_text(shape.label)
+                shape.fill_color = generate_color_by_text(shape.label)
+                
+                # canvasとlabel listに追加
+                self.canvas.shapes.append(shape)
+                self.add_label(shape)
+            
+            # canvas更新
+            self.canvas.load_shapes(self.canvas.shapes)
+            self.canvas.update()
+            
+            # dirtyフラグを設定
+            self.set_dirty()
+            
+        finally:
+            # 復元中フラグをクリア
+            self.undo_manager.get_manager(self.file_path).set_restoring(False)
+    
+    def save_undo_state(self, operation_type="unknown"):
+        """現在の状態をUndo履歴に保存"""
+        if not self.file_path:
+            return
+        
+        self.undo_manager.set_current_frame(self.file_path)
+        state = self.get_current_state()
+        self.undo_manager.save_state(state, operation_type)
+        
+        # Undo/Redoボタンの有効/無効を更新（actionsが初期化されている場合のみ）
+        if hasattr(self, 'actions'):
+            if hasattr(self.actions, 'undo') and self.actions.undo:
+                self.actions.undo.setEnabled(self.undo_manager.can_undo())
+            if hasattr(self.actions, 'redo') and self.actions.redo:
+                self.actions.redo.setEnabled(self.undo_manager.can_redo())
+    
+    def undo_action(self):
+        """Undo実行"""
+        if not self.file_path:
+            return
+        
+        self.undo_manager.set_current_frame(self.file_path)
+        
+        if not self.undo_manager.can_undo():
+            self.statusBar().showMessage('Nothing to undo', 2000)
+            return
+        
+        # 現在の状態を保存（初回のundo時のみ）
+        current_state = self.get_current_state()
+        manager = self.undo_manager.get_manager(self.file_path)
+        
+        # 現在の状態が履歴の最後と異なる場合は保存
+        last_state = manager.get_current_state()
+        if last_state and len(current_state['shapes']) != len(last_state['shapes']):
+            self.save_undo_state("before_undo")
+        
+        # Undo実行
+        state = self.undo_manager.undo()
+        if state:
+            self.restore_state(state)
+            self.statusBar().showMessage('Undo successful', 2000)
+        
+        # ボタンの有効/無効を更新
+        if hasattr(self.actions, 'undo'):
+            self.actions.undo.setEnabled(self.undo_manager.can_undo())
+        if hasattr(self.actions, 'redo'):
+            self.actions.redo.setEnabled(self.undo_manager.can_redo())
+    
+    def redo_action(self):
+        """Redo実行"""
+        if not self.file_path:
+            return
+        
+        self.undo_manager.set_current_frame(self.file_path)
+        
+        if not self.undo_manager.can_redo():
+            self.statusBar().showMessage('Nothing to redo', 2000)
+            return
+        
+        # Redo実行
+        state = self.undo_manager.redo()
+        if state:
+            self.restore_state(state)
+            self.statusBar().showMessage('Redo successful', 2000)
+        
+        # ボタンの有効/無効を更新
+        if hasattr(self.actions, 'undo'):
+            self.actions.undo.setEnabled(self.undo_manager.can_undo())
+        if hasattr(self.actions, 'redo'):
+            self.actions.redo.setEnabled(self.undo_manager.can_redo())
+
     def toggle_draw_square(self):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())
     
@@ -1830,7 +2030,13 @@ class MainWindow(QMainWindow, WindowMixin):
         """Toggle BB duplication mode."""
         self.bb_duplication_mode = (state == Qt.Checked)
         self.bb_dup_frame_count.setEnabled(self.bb_duplication_mode)
+        self.bb_dup_iou_threshold.setEnabled(self.bb_duplication_mode)
         self.bb_dup_overwrite_checkbox.setEnabled(self.bb_duplication_mode)
+    
+    def update_overwrite_checkbox_text(self):
+        """Update the overwrite checkbox text with current IOU threshold."""
+        threshold = self.bb_dup_iou_threshold.value()
+        self.bb_dup_overwrite_checkbox.setText(f"重複時に上書き (IOU>{threshold:.1f})")
     
     def calculate_iou(self, box1, box2):
         """Calculate Intersection over Union between two bounding boxes."""
@@ -1919,7 +2125,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 if len(source_shape.points) == 4 and len(existing_shape.points) == 4:
                     iou = self.calculate_iou(source_shape.points, existing_shape.points)
                     print(f"[BB Duplication] Checking IOU with existing shape: {iou:.3f}")
-                    if iou >= 0.6:
+                    iou_threshold = self.bb_dup_iou_threshold.value()
+                    if iou >= iou_threshold:
                         if overwrite_mode:
                             # Mark shape for removal
                             shape_to_remove = existing_shape
