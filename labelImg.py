@@ -1935,10 +1935,12 @@ class MainWindow(QMainWindow, WindowMixin):
         
         for shape in self.canvas.shapes:
             shape_data = {
-                'label': shape.label,
+                'label': shape.label if shape.label else "",
                 'points': [(p.x(), p.y()) for p in shape.points],
                 'difficult': getattr(shape, 'difficult', False),
                 'paint_label': getattr(shape, 'paint_label', False),
+                'line_color': shape.line_color.getRgb() if hasattr(shape, 'line_color') and shape.line_color else None,
+                'fill_color': shape.fill_color.getRgb() if hasattr(shape, 'fill_color') and shape.fill_color else None,
             }
             # Track IDがあれば保存
             if hasattr(shape, 'track_id'):
@@ -1970,7 +1972,7 @@ class MainWindow(QMainWindow, WindowMixin):
             # shapesを復元
             for shape_data in state.get('shapes', []):
                 shape = Shape()
-                shape.label = shape_data['label']
+                shape.label = shape_data.get('label', '') or ''
                 shape.points = [QPointF(x, y) for x, y in shape_data['points']]
                 shape.close()
                 shape.difficult = shape_data.get('difficult', False)
@@ -1982,9 +1984,20 @@ class MainWindow(QMainWindow, WindowMixin):
                 if 'is_tracked' in shape_data:
                     shape.is_tracked = shape_data['is_tracked']
                 
-                # 色を設定
-                shape.line_color = generate_color_by_text(shape.label)
-                shape.fill_color = generate_color_by_text(shape.label)
+                # 色を復元または生成
+                if 'line_color' in shape_data and shape_data['line_color']:
+                    shape.line_color = QColor(*shape_data['line_color'])
+                elif shape.label:
+                    shape.line_color = generate_color_by_text(shape.label)
+                else:
+                    shape.line_color = DEFAULT_LINE_COLOR
+                
+                if 'fill_color' in shape_data and shape_data['fill_color']:
+                    shape.fill_color = QColor(*shape_data['fill_color'])
+                elif shape.label:
+                    shape.fill_color = generate_color_by_text(shape.label)
+                else:
+                    shape.fill_color = DEFAULT_FILL_COLOR
                 
                 # canvasとlabel listに追加
                 self.canvas.shapes.append(shape)
