@@ -30,6 +30,7 @@ class Canvas(QWidget):
     shapeMoved = pyqtSignal()
     drawingPolygon = pyqtSignal(bool)
     shapeClicked = pyqtSignal()
+    shapeModified = pyqtSignal()  # Shape edited (moved, resized)
 
     CREATE, EDIT = list(range(2))
 
@@ -292,8 +293,12 @@ class Canvas(QWidget):
         elif ev.button() == Qt.LeftButton and self.selected_shape:
             if self.selected_vertex():
                 self.override_cursor(CURSOR_POINT)
+                # Emit signal that shape was modified (vertex moved)
+                self.shapeModified.emit()
             else:
                 self.override_cursor(CURSOR_GRAB)
+                # Emit signal that shape was modified (shape moved)
+                self.shapeModified.emit()
         elif ev.button() == Qt.LeftButton:
             pos = self.transform_pos(ev.pos())
             if self.drawing():
@@ -689,6 +694,7 @@ class Canvas(QWidget):
             self.selected_shape.points[2] += QPointF(0, 1.0)
             self.selected_shape.points[3] += QPointF(0, 1.0)
         self.shapeMoved.emit()
+        self.shapeModified.emit()  # Also emit shapeModified for undo support
         self.repaint()
 
     def move_out_of_bound(self, step):

@@ -321,6 +321,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.selectionChanged.connect(self.shape_selection_changed)
         self.canvas.drawingPolygon.connect(self.toggle_drawing_sensitive)
         self.canvas.shapeClicked.connect(self.on_shape_clicked)
+        
+        # Connect shapeModified signal to save undo state
+        self.canvas.shapeModified.connect(self.on_shape_modified)
 
         self.setCentralWidget(scroll)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
@@ -931,6 +934,9 @@ class MainWindow(QMainWindow, WindowMixin):
             return
         text = self.label_dialog.pop_up(item.text())
         if text is not None:
+            # Save state before editing label
+            self.save_undo_state("edit_label")
+            
             item.setText(text)
             item.setBackground(generate_color_by_text(text))
             self.set_dirty()
@@ -2411,6 +2417,25 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.click_change_label_mode:
             self.apply_label_to_selected_shape()
     
+    def on_shape_modified(self):
+        """Handle shape modification (move/resize) for undo support."""
+        if not self.file_path or not hasattr(self, '_shape_modify_timer'):
+            # Initialize timer for debouncing shape modifications
+            from PyQt5.QtCore import QTimer
+            self._shape_modify_timer = QTimer()
+            self._shape_modify_timer.setSingleShot(True)
+            self._shape_modify_timer.timeout.connect(self._save_shape_modification)
+            
+        # Reset timer - we'll save state after user stops modifying for 500ms
+        self._shape_modify_timer.stop()
+        self._shape_modify_timer.start(500)
+    
+    def _save_shape_modification(self):
+        """Save shape modification to undo history after debounce."""
+        if self.file_path:
+            print("[DEBUG] Saving shape modification to undo history")
+            self.save_undo_state("shape_modified")
+    
     def apply_label_to_selected_shape(self):
         """Apply label to the selected shape based on current settings."""
         if not self.click_change_label_mode:
@@ -2427,6 +2452,9 @@ class MainWindow(QMainWindow, WindowMixin):
         item = self.shapes_to_items.get(shape)
         if not item:
             return
+        
+        # Save state before changing label for undo
+        self.save_undo_state("click_change_label")
         
         # Set flag to prevent recursion
         self._applying_label = True
@@ -2985,6 +3013,9 @@ class MainWindow(QMainWindow, WindowMixin):
         curr_shapes = self.canvas.shapes
         if not curr_shapes:
             return
+        
+        # Save state before tracking for undo
+        self.save_undo_state("continuous_tracking")
         
         # Debug: Print before tracking
         print(f"[Tracking] Applying tracking to frame {self.cur_img_idx}")
