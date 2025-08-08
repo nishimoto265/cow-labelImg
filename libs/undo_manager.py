@@ -154,6 +154,30 @@ class UndoManager:
         }
 
 
+class MultiFrameOperation:
+    """
+    複数フレームにまたがる操作を表すクラス
+    """
+    def __init__(self, operation_type, description=""):
+        self.operation_type = operation_type  # 'bb_duplication', 'continuous_tracking' など
+        self.description = description
+        self.frame_changes = []  # [(frame_path, before_state, after_state), ...]
+        self.timestamp = None
+        self.source_frame = None
+    
+    def add_frame_change(self, frame_path, before_state, after_state):
+        """フレームごとの変更を記録"""
+        self.frame_changes.append({
+            'frame_path': frame_path,
+            'before': copy.deepcopy(before_state),
+            'after': copy.deepcopy(after_state)
+        })
+    
+    def get_affected_frames(self):
+        """影響を受けたフレームのリストを返す"""
+        return [change['frame_path'] for change in self.frame_changes]
+
+
 class FrameUndoManager:
     """
     フレームごとに独立したUndo/Redo管理
@@ -167,6 +191,9 @@ class FrameUndoManager:
         self.frame_managers = {}  # フレームパスごとのUndoManager
         self.max_history = max_history_per_frame
         self.current_frame = None
+        self.multi_frame_operations = []  # 複数フレーム操作の履歴
+        self.multi_frame_index = -1  # 現在の複数フレーム操作のインデックス
+        self.max_multi_frame_operations = 10  # 最大履歴数
     
     def get_manager(self, frame_path):
         """
@@ -215,3 +242,123 @@ class FrameUndoManager:
         if self.current_frame:
             return self.get_manager(self.current_frame).can_redo()
         return False
+
+    
+    # ========== Multi-frame operation methods ==========
+    
+    def start_multi_frame_operation(self, operation_type, description=""):
+        """
+        複数フレーム操作を開始
+        
+        Args:
+            operation_type: 操作タイプ（'bb_duplication', 'continuous_tracking'など）
+            description: 操作の説明
+            
+        Returns:
+            MultiFrameOperation object
+        """
+        operation = MultiFrameOperation(operation_type, description)
+        operation.source_frame = self.current_frame
+        print(f"[MultiFrame] Starting {operation_type} operation from {self.current_frame}")
+        return operation
+    
+    def save_multi_frame_operation(self, operation):
+        """
+        複数フレーム操作を履歴に保存
+        
+        Args:
+            operation: MultiFrameOperation object
+        """
+        if not operation.frame_changes:
+            print("[MultiFrame] No changes to save")
+            return
+        
+        # 現在位置より後の履歴を削除（redo履歴をクリア）
+        if self.multi_frame_index < len(self.multi_frame_operations) - 1:
+            self.multi_frame_operations = self.multi_frame_operations[:self.multi_frame_index + 1]
+        
+        # 操作を追加
+        self.multi_frame_operations.append(operation)
+        self.multi_frame_index += 1
+        
+        # 履歴サイズ制限
+        if len(self.multi_frame_operations) > self.max_multi_frame_operations:
+            self.multi_frame_operations.pop(0)
+            self.multi_frame_index -= 1
+        
+        print(f"[MultiFrame] Saved {operation.operation_type} affecting {len(operation.frame_changes)} frames")
+        print(f"[MultiFrame] History size: {len(self.multi_frame_operations)}, Index: {self.multi_frame_index}")
+    
+    def undo_multi_frame(self):
+        """
+        複数フレーム操作のUndo
+        
+        Returns:
+            Undone operation or None
+        """
+        if not self.can_undo_multi_frame():
+            print("[MultiFrame] Cannot undo multi-frame operation")
+            return None
+        
+        operation = self.multi_frame_operations[self.multi_frame_index]
+        self.multi_frame_index -= 1
+        
+        print(f"[MultiFrame] Undoing {operation.operation_type} affecting {len(operation.frame_changes)} frames")
+        
+        # 各フレームを前の状態に戻す
+        for change in operation.frame_changes:
+            frame_path = change['frame_path']
+            before_state = change['before']
+            
+            # フレームのマネージャーを取得
+            manager = self.get_manager(frame_path)
+            # 直接履歴を操作して前の状態を設定
+            manager.history.append(copy.deepcopy(before_state))
+            manager.current_index = len(manager.history) - 1
+            
+            print(f"[MultiFrame] Restored {frame_path} to before state")
+        
+        return operation
+    
+    def redo_multi_frame(self):
+        """
+        複数フレーム操作のRedo
+        
+        Returns:
+            Redone operation or None
+        """
+        if not self.can_redo_multi_frame():
+            print("[MultiFrame] Cannot redo multi-frame operation")
+            return None
+        
+        self.multi_frame_index += 1
+        operation = self.multi_frame_operations[self.multi_frame_index]
+        
+        print(f"[MultiFrame] Redoing {operation.operation_type} affecting {len(operation.frame_changes)} frames")
+        
+        # 各フレームを後の状態に戻す
+        for change in operation.frame_changes:
+            frame_path = change['frame_path']
+            after_state = change['after']
+            
+            # フレームのマネージャーを取得
+            manager = self.get_manager(frame_path)
+            # 直接履歴を操作して後の状態を設定
+            manager.history.append(copy.deepcopy(after_state))
+            manager.current_index = len(manager.history) - 1
+            
+            print(f"[MultiFrame] Restored {frame_path} to after state")
+        
+        return operation
+    
+    def can_undo_multi_frame(self):
+        """複数フレーム操作のUndo可能かチェック"""
+        return self.multi_frame_index >= 0
+    
+    def can_redo_multi_frame(self):
+        """複数フレーム操作のRedo可能かチェック"""
+        return self.multi_frame_index < len(self.multi_frame_operations) - 1
+    
+    def has_multi_frame_operations(self):
+        """複数フレーム操作の履歴があるかチェック"""
+        return len(self.multi_frame_operations) > 0

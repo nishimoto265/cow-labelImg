@@ -2042,6 +2042,12 @@ class MainWindow(QMainWindow, WindowMixin):
             print("[DEBUG] No file_path, returning")
             return
         
+        # Check for multi-frame operations first
+        if self.undo_manager.can_undo_multi_frame():
+            print("[DEBUG] Multi-frame undo available, using it")
+            self.undo_multi_frame_operation()
+            return
+        
         print(f"[DEBUG] Setting current frame for undo: {self.file_path}")
         self.undo_manager.set_current_frame(self.file_path)
         
@@ -2077,6 +2083,12 @@ class MainWindow(QMainWindow, WindowMixin):
         if not self.file_path:
             return
         
+        # Check for multi-frame operations first
+        if self.undo_manager.can_redo_multi_frame():
+            print("[DEBUG] Multi-frame redo available, using it")
+            self.redo_multi_frame_operation()
+            return
+        
         self.undo_manager.set_current_frame(self.file_path)
         
         if not self.undo_manager.can_redo():
@@ -2094,6 +2106,99 @@ class MainWindow(QMainWindow, WindowMixin):
             self.actions.undo.setEnabled(self.undo_manager.can_undo())
         if hasattr(self.actions, 'redo'):
             self.actions.redo.setEnabled(self.undo_manager.can_redo())
+
+    
+    def undo_multi_frame_operation(self):
+        """複数フレーム操作のUndo"""
+        print("[DEBUG] Executing multi-frame undo")
+        
+        # Save current frame
+        current_file = self.file_path
+        
+        # Execute undo
+        operation = self.undo_manager.undo_multi_frame()
+        if not operation:
+            print("[DEBUG] Multi-frame undo failed")
+            return
+        
+        # Process each affected frame
+        for change in operation.frame_changes:
+            frame_path = change['frame_path']
+            before_state = change['before']
+            
+            # Load frame and restore state
+            print(f"[DEBUG] Restoring frame: {frame_path}")
+            self.load_file(frame_path, preserve_zoom=True)
+            self.restore_state(before_state)
+            
+            # Save if auto-saving is enabled
+            if self.auto_saving.isChecked() and self.default_save_dir:
+                self.save_file()
+        
+        # Return to original frame
+        self.load_file(current_file, preserve_zoom=True)
+        
+        # Update status
+        self.statusBar().showMessage(
+            f'Undone: {operation.operation_type} ({len(operation.frame_changes)} frames)', 
+            3000
+        )
+        
+        # Update button states
+        if hasattr(self.actions, 'undo') and self.actions.undo:
+            self.actions.undo.setEnabled(
+                self.undo_manager.can_undo_multi_frame() or self.undo_manager.can_undo()
+            )
+        if hasattr(self.actions, 'redo') and self.actions.redo:
+            self.actions.redo.setEnabled(
+                self.undo_manager.can_redo_multi_frame() or self.undo_manager.can_redo()
+            )
+    
+    def redo_multi_frame_operation(self):
+        """複数フレーム操作のRedo"""
+        print("[DEBUG] Executing multi-frame redo")
+        
+        # Save current frame
+        current_file = self.file_path
+        
+        # Execute redo
+        operation = self.undo_manager.redo_multi_frame()
+        if not operation:
+            print("[DEBUG] Multi-frame redo failed")
+            return
+        
+        # Process each affected frame
+        for change in operation.frame_changes:
+            frame_path = change['frame_path']
+            after_state = change['after']
+            
+            # Load frame and restore state
+            print(f"[DEBUG] Restoring frame: {frame_path}")
+            self.load_file(frame_path, preserve_zoom=True)
+            self.restore_state(after_state)
+            
+            # Save if auto-saving is enabled
+            if self.auto_saving.isChecked() and self.default_save_dir:
+                self.save_file()
+        
+        # Return to original frame
+        self.load_file(current_file, preserve_zoom=True)
+        
+        # Update status
+        self.statusBar().showMessage(
+            f'Redone: {operation.operation_type} ({len(operation.frame_changes)} frames)', 
+            3000
+        )
+        
+        # Update button states
+        if hasattr(self.actions, 'undo') and self.actions.undo:
+            self.actions.undo.setEnabled(
+                self.undo_manager.can_undo_multi_frame() or self.undo_manager.can_undo()
+            )
+        if hasattr(self.actions, 'redo') and self.actions.redo:
+            self.actions.redo.setEnabled(
+                self.undo_manager.can_redo_multi_frame() or self.undo_manager.can_redo()
+            )
 
     def toggle_draw_square(self):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())
@@ -2184,6 +2289,12 @@ class MainWindow(QMainWindow, WindowMixin):
         current_file = self.file_path
         current_idx = self.cur_img_idx
         
+        # Start multi-frame operation for undo
+        multi_frame_op = self.undo_manager.start_multi_frame_operation(
+            'bb_duplication', 
+            f'Duplicate BB to {num_frames} frames'
+        )
+        
         frames_processed = 0
         frames_with_conflicts = 0
         
@@ -2207,7 +2318,10 @@ class MainWindow(QMainWindow, WindowMixin):
             
             # Load target frame
             target_file = self.m_img_list[target_idx]
+            
+            # Save current state before modification
             self.load_file(target_file, preserve_zoom=True)
+            before_state = self.get_current_state()
             
             # Check for overlapping shapes
             shape_to_remove = None
@@ -2218,8 +2332,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 if len(source_shape.points) == 4 and len(existing_shape.points) == 4:
                     iou = self.calculate_iou(source_shape.points, existing_shape.points)
                     print(f"[BB Duplication] Checking IOU with existing shape: {iou:.3f}")
-                    iou_threshold = self.bb_dup_iou_threshold.value()
-                    if iou >= iou_threshold:
+                    if iou >= 0.6:
                         if overwrite_mode:
                             # Mark shape for removal
                             shape_to_remove = existing_shape
@@ -2231,19 +2344,22 @@ class MainWindow(QMainWindow, WindowMixin):
                             print(f"[BB Duplication] Frame {target_idx}: Skipping due to overlap (IOU={iou:.2f})")
                         break
             
+            # Perform modifications
+            modified = False
+            
             # Remove overlapping shape if in overwrite mode
             if shape_to_remove:
-                # Remove shape from canvas
                 self.canvas.shapes.remove(shape_to_remove)
                 # Remove from label list
                 for i in range(self.label_list.count()):
                     item = self.label_list.item(i)
-                    if item and item in self.shapes_to_items:
-                        if self.shapes_to_items[item] == shape_to_remove:
+                    if item and item in self.items_to_shapes:
+                        if self.items_to_shapes[item] == shape_to_remove:
                             self.label_list.takeItem(i)
                             del self.items_to_shapes[item]
                             del self.shapes_to_items[shape_to_remove]
                             break
+                modified = True
             
             # Add duplicated shape
             if should_add_shape:
@@ -2262,12 +2378,23 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.add_label(new_shape)
                 self.set_dirty()
                 frames_processed += 1
+                modified = True
                 
                 # Save the file
                 if self.auto_saving.isChecked() and self.default_save_dir:
                     self.save_file()
+            
+            # Record change for undo if any modification was made
+            if modified:
+                after_state = self.get_current_state()
+                multi_frame_op.add_frame_change(target_file, before_state, after_state)
         
         progress.close()
+        
+        # Save multi-frame operation for undo
+        if multi_frame_op.frame_changes:
+            self.undo_manager.save_multi_frame_operation(multi_frame_op)
+            print(f"[BB Duplication] Saved undo information for {len(multi_frame_op.frame_changes)} frames")
         
         # Return to original frame
         self.load_file(current_file, preserve_zoom=True)
