@@ -141,6 +141,7 @@ class MainWindow(QMainWindow, WindowMixin):
         # Initialize Undo/Redo manager
         self.undo_manager = FrameUndoManager(max_history_per_frame=30)
         print("[Main] Undo/Redo manager initialized")
+        print(f"[DEBUG] UndoManager created: {self.undo_manager}")
 
         list_layout = QVBoxLayout()
         list_layout.setContentsMargins(0, 0, 0, 0)
@@ -334,10 +335,13 @@ class MainWindow(QMainWindow, WindowMixin):
                                  'a', 'prev', get_str('prevImgDetail'))
         
         # Undo/Redo actions
+        print("[DEBUG] Creating undo/redo actions...")
         undo = action('Undo', self.undo_action,
                      'Ctrl+Z', 'undo', 'Undo last action')
         redo = action('Redo', self.redo_action,
                      'Ctrl+Y', 'redo', 'Redo last action')
+        print(f"[DEBUG] Undo action created: {undo}")
+        print(f"[DEBUG] Redo action created: {redo}")
 
         verify = action(get_str('verifyImg'), self.verify_image,
                         'space', 'verify', get_str('verifyImgDetail'))
@@ -653,9 +657,27 @@ class MainWindow(QMainWindow, WindowMixin):
             self.canvas.set_drawing_shape_to_square(False)
 
     def keyPressEvent(self, event):
+        print(f"[DEBUG] keyPressEvent: key={event.key()}, modifiers={event.modifiers()}")
+        print(f"[DEBUG] Qt.Key_Z={Qt.Key_Z}, Qt.Key_Y={Qt.Key_Y}, Qt.ControlModifier={Qt.ControlModifier}")
+        
+        # Check for Ctrl+Z
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Z:
+            print("[DEBUG] Ctrl+Z detected in keyPressEvent")
+            self.undo_action()
+            return
+        
+        # Check for Ctrl+Y
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Y:
+            print("[DEBUG] Ctrl+Y detected in keyPressEvent")
+            self.redo_action()
+            return
+        
         if event.key() == Qt.Key_Control:
             # Draw rectangle if Ctrl is pressed
             self.canvas.set_drawing_shape_to_square(True)
+        
+        # Call parent implementation for other key events
+        super(MainWindow, self).keyPressEvent(event)
 
     # Support Functions #
     def set_format(self, save_format):
@@ -1097,6 +1119,7 @@ class MainWindow(QMainWindow, WindowMixin):
         # Add Chris
         self.diffc_button.setChecked(False)
         if text is not None:
+            print(f"[DEBUG] new_shape: Adding shape with label '{text}'")
             # Save state before adding new shape
             self.save_undo_state("add_shape")
             
@@ -1332,9 +1355,12 @@ class MainWindow(QMainWindow, WindowMixin):
             self.canvas.setFocus(True)
             
             # Initialize undo manager for this file
+            print(f"[DEBUG] Initializing undo manager for file: {self.file_path}")
             self.undo_manager.set_current_frame(self.file_path)
             initial_state = self.get_current_state()
+            print(f"[DEBUG] Initial state has {len(initial_state['shapes'])} shapes")
             self.undo_manager.get_manager(self.file_path).initialize_with_state(initial_state)
+            print(f"[DEBUG] Undo manager initialized for file")
             
             return True
         return False
@@ -1760,6 +1786,7 @@ class MainWindow(QMainWindow, WindowMixin):
             self.set_dirty()
 
     def delete_selected_shape(self):
+        print("[DEBUG] delete_selected_shape called")
         # Save state before deletion
         self.save_undo_state("delete_shape")
         
@@ -1884,8 +1911,11 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def restore_state(self, state):
         """状態を復元"""
+        print(f"[DEBUG] restore_state called with state: {state is not None}")
         if not state:
+            print("[DEBUG] State is None, returning")
             return
+        print(f"[DEBUG] Restoring {len(state.get('shapes', []))} shapes")
         
         # 復元中フラグをセット
         self.undo_manager.get_manager(self.file_path).set_restoring(True)
@@ -1933,12 +1963,17 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def save_undo_state(self, operation_type="unknown"):
         """現在の状態をUndo履歴に保存"""
+        print(f"[DEBUG] save_undo_state called for operation: {operation_type}")
         if not self.file_path:
+            print("[DEBUG] No file_path in save_undo_state, returning")
             return
         
+        print(f"[DEBUG] Setting current frame to: {self.file_path}")
         self.undo_manager.set_current_frame(self.file_path)
         state = self.get_current_state()
+        print(f"[DEBUG] Current state has {len(state['shapes'])} shapes")
         self.undo_manager.save_state(state, operation_type)
+        print(f"[DEBUG] State saved successfully")
         
         # Undo/Redoボタンの有効/無効を更新（actionsが初期化されている場合のみ）
         if hasattr(self, 'actions'):
@@ -1949,12 +1984,17 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def undo_action(self):
         """Undo実行"""
+        print("[DEBUG] undo_action called!")
         if not self.file_path:
+            print("[DEBUG] No file_path, returning")
             return
         
+        print(f"[DEBUG] Setting current frame for undo: {self.file_path}")
         self.undo_manager.set_current_frame(self.file_path)
         
+        print(f"[DEBUG] Can undo? {self.undo_manager.can_undo()}")
         if not self.undo_manager.can_undo():
+            print("[DEBUG] Cannot undo - showing status message")
             self.statusBar().showMessage('Nothing to undo', 2000)
             return
         
