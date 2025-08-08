@@ -142,6 +142,22 @@ class MainWindow(QMainWindow, WindowMixin):
         self.undo_manager = FrameUndoManager(max_history_per_frame=30)
         print("[Main] Undo/Redo manager initialized")
         print(f"[DEBUG] UndoManager created: {self.undo_manager}")
+        
+        # Install event filter to catch keyboard shortcuts globally
+        self.installEventFilter(self)
+        print("[DEBUG] Event filter installed for global keyboard shortcuts")
+        
+        # Also create QShortcut objects as a fallback
+        from PyQt5.QtWidgets import QShortcut
+        from PyQt5.QtGui import QKeySequence
+        
+        self.undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.undo_shortcut.activated.connect(self.undo_action)
+        print("[DEBUG] QShortcut for Ctrl+Z created")
+        
+        self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
+        self.redo_shortcut.activated.connect(self.redo_action)
+        print("[DEBUG] QShortcut for Ctrl+Y created")
 
         list_layout = QVBoxLayout()
         list_layout.setContentsMargins(0, 0, 0, 0)
@@ -283,6 +299,10 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.canvas = Canvas(parent=self)
         self.canvas.zoomRequest.connect(self.zoom_request)
+        
+        # Install event filter on canvas too
+        self.canvas.installEventFilter(self)
+        print("[DEBUG] Event filter installed on canvas")
         self.canvas.lightRequest.connect(self.light_request)
         self.canvas.set_drawing_shape_to_square(settings.get(SETTING_DRAW_SQUARE, False))
 
@@ -678,6 +698,26 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Call parent implementation for other key events
         super(MainWindow, self).keyPressEvent(event)
+
+    def eventFilter(self, obj, event):
+        """Global event filter to catch keyboard shortcuts"""
+        if event.type() == event.KeyPress:
+            print(f"[DEBUG] eventFilter caught KeyPress: key={event.key()}, modifiers={event.modifiers()}")
+            
+            # Check for Ctrl+Z
+            if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Z:
+                print("[DEBUG] Ctrl+Z detected in eventFilter!")
+                self.undo_action()
+                return True  # Event handled
+            
+            # Check for Ctrl+Y
+            if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Y:
+                print("[DEBUG] Ctrl+Y detected in eventFilter!")
+                self.redo_action()
+                return True  # Event handled
+        
+        # Pass event to parent
+        return super(MainWindow, self).eventFilter(obj, event)
 
     # Support Functions #
     def set_format(self, save_format):
