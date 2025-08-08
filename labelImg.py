@@ -1400,13 +1400,19 @@ class MainWindow(QMainWindow, WindowMixin):
 
             self.canvas.setFocus(True)
             
-            # Initialize undo manager for this file
-            print(f"[DEBUG] Initializing undo manager for file: {self.file_path}")
+            # Initialize undo manager for this file if not already initialized
+            print(f"[DEBUG] Setting undo manager for file: {self.file_path}")
             self.undo_manager.set_current_frame(self.file_path)
-            initial_state = self.get_current_state()
-            print(f"[DEBUG] Initial state has {len(initial_state['shapes'])} shapes")
-            self.undo_manager.get_manager(self.file_path).initialize_with_state(initial_state)
-            print(f"[DEBUG] Undo manager initialized for file")
+            
+            # Only initialize with state if this frame has no history yet
+            manager = self.undo_manager.get_manager(self.file_path)
+            if not manager.history:
+                initial_state = self.get_current_state()
+                print(f"[DEBUG] Initial state has {len(initial_state['shapes'])} shapes")
+                manager.initialize_with_state(initial_state)
+                print(f"[DEBUG] Undo manager initialized for new file")
+            else:
+                print(f"[DEBUG] Undo manager already has history for this file (history size: {len(manager.history)})")
             
             return True
         return False
