@@ -2344,7 +2344,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 if len(source_shape.points) == 4 and len(existing_shape.points) == 4:
                     iou = self.calculate_iou(source_shape.points, existing_shape.points)
                     print(f"[BB Duplication] Checking IOU with existing shape: {iou:.3f}")
-                    if iou >= 0.6:
+                    if iou >= self.bb_dup_iou_threshold.value():
                         if overwrite_mode:
                             # Mark shape for removal
                             shape_to_remove = existing_shape
