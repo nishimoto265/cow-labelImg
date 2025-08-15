@@ -2336,7 +2336,7 @@ class MainWindow(QMainWindow, WindowMixin):
             before_state = self.get_current_state()
             
             # Check for overlapping shapes
-            shape_to_remove = None
+            shapes_to_remove = []
             should_add_shape = True
             
             for existing_shape in self.canvas.shapes:
@@ -2347,30 +2347,31 @@ class MainWindow(QMainWindow, WindowMixin):
                     if iou >= self.bb_dup_iou_threshold.value():
                         if overwrite_mode:
                             # Mark shape for removal
-                            shape_to_remove = existing_shape
+                            shapes_to_remove.append(existing_shape)
                             print(f"[BB Duplication] Frame {target_idx}: Overwriting existing BB (IOU={iou:.2f})")
                         else:
-                            # Skip this frame
+                            # Skip this frame if any overlap found
                             should_add_shape = False
                             frames_with_conflicts += 1
                             print(f"[BB Duplication] Frame {target_idx}: Skipping due to overlap (IOU={iou:.2f})")
-                        break
+                            break  # In skip mode, one overlap is enough to skip
             
             # Perform modifications
             modified = False
             
-            # Remove overlapping shape if in overwrite mode
-            if shape_to_remove:
-                self.canvas.shapes.remove(shape_to_remove)
-                # Remove from label list
-                for i in range(self.label_list.count()):
-                    item = self.label_list.item(i)
-                    if item and item in self.items_to_shapes:
-                        if self.items_to_shapes[item] == shape_to_remove:
-                            self.label_list.takeItem(i)
-                            del self.items_to_shapes[item]
-                            del self.shapes_to_items[shape_to_remove]
-                            break
+            # Remove all overlapping shapes if in overwrite mode
+            if shapes_to_remove:
+                for shape_to_remove in shapes_to_remove:
+                    self.canvas.shapes.remove(shape_to_remove)
+                    # Remove from label list
+                    for i in range(self.label_list.count()):
+                        item = self.label_list.item(i)
+                        if item and item in self.items_to_shapes:
+                            if self.items_to_shapes[item] == shape_to_remove:
+                                self.label_list.takeItem(i)
+                                del self.items_to_shapes[item]
+                                del self.shapes_to_items[shape_to_remove]
+                                break
                 modified = True
             
             # Add duplicated shape
