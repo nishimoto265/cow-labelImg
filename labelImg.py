@@ -51,6 +51,7 @@ from libs.create_ml_io import JSON_EXT
 from libs.ustr import ustr
 from libs.hashableQListWidgetItem import HashableQListWidgetItem
 from libs.tracker import Tracker
+from libs.quick_id_selector import QuickIDSelector
 
 __appname__ = 'labelImg'
 
@@ -142,6 +143,11 @@ class MainWindow(QMainWindow, WindowMixin):
         self.undo_manager = FrameUndoManager(max_history_per_frame=30)
         print("[Main] Undo/Redo manager initialized")
         print(f"[DEBUG] UndoManager created: {self.undo_manager}")
+        
+        # Initialize Quick ID Selector
+        self.quick_id_selector = QuickIDSelector(parent=self, max_ids=30)
+        self.quick_id_selector.id_selected.connect(self.on_quick_id_selected)
+        self.current_quick_id = "1"  # デフォルトID
         
         # Install event filter to catch keyboard shortcuts globally
         self.installEventFilter(self)
@@ -409,6 +415,8 @@ class MainWindow(QMainWindow, WindowMixin):
                         'w', 'new', get_str('crtBoxDetail'), enabled=False)
         delete = action(get_str('delBox'), self.delete_selected_shape,
                         'Delete', 'delete', get_str('delBoxDetail'), enabled=False)
+        print(f"[DEBUG] Delete action created: {delete}")
+        print(f"[DEBUG] Delete action shortcut: {delete.shortcut().toString()}")
         copy = action(get_str('dupBox'), self.copy_selected_shape,
                       'Ctrl+D', 'copy', get_str('dupBoxDetail'),
                       enabled=False)
@@ -670,6 +678,20 @@ class MainWindow(QMainWindow, WindowMixin):
         # Display cursor coordinates at the right of status bar
         self.label_coordinates = QLabel('')
         self.statusBar().addPermanentWidget(self.label_coordinates)
+        
+        # Display current Quick ID at the right of status bar
+        self.label_current_id = QLabel('ID: 1')
+        self.label_current_id.setStyleSheet("""
+            QLabel {
+                background-color: #0066cc;
+                color: white;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-weight: bold;
+                margin-left: 8px;
+            }
+        """)
+        self.statusBar().addPermanentWidget(self.label_current_id)
 
         # Open Dir if default file
         if self.file_path and os.path.isdir(self.file_path):
@@ -682,6 +704,22 @@ class MainWindow(QMainWindow, WindowMixin):
     def keyPressEvent(self, event):
         print(f"[DEBUG] keyPressEvent: key={event.key()}, modifiers={event.modifiers()}")
         print(f"[DEBUG] Qt.Key_Z={Qt.Key_Z}, Qt.Key_Y={Qt.Key_Y}, Qt.ControlModifier={Qt.ControlModifier}")
+        
+        # F1キー: Quick ID Selectorの表示/非表示
+        if event.key() == Qt.Key_F1:
+            self.toggle_quick_id_selector()
+            return
+        
+        # 数字キー（1-9）: Quick ID直接選択
+        if Qt.Key_1 <= event.key() <= Qt.Key_9:
+            id_num = event.key() - Qt.Key_0
+            self.select_quick_id(str(id_num))
+            return
+        
+        # 0キー: ID 10を選択
+        elif event.key() == Qt.Key_0:
+            self.select_quick_id("10")
+            return
         
         # Check for Ctrl+Z
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Z:
@@ -702,10 +740,64 @@ class MainWindow(QMainWindow, WindowMixin):
         # Call parent implementation for other key events
         super(MainWindow, self).keyPressEvent(event)
 
+    def wheelEvent(self, event):
+        """マウスホイールイベント処理"""
+        # Shift+ホイール: Quick ID切り替え
+        if event.modifiers() == Qt.ShiftModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                # 上スクロール: 前のIDへ
+                self.prev_quick_id()
+            elif delta < 0:
+                # 下スクロール: 次のIDへ
+                self.next_quick_id()
+            event.accept()
+            return
+        
+        # 通常のホイールイベントは親クラスに委譲
+        super(MainWindow, self).wheelEvent(event)
+
     def eventFilter(self, obj, event):
         """Global event filter to catch keyboard shortcuts"""
         if event.type() == event.KeyPress:
             print(f"[DEBUG] eventFilter caught KeyPress: key={event.key()}, modifiers={event.modifiers()}")
+            
+            # DELキーの特別デバッグ (16777223 = Qt.Key_Delete)
+            if event.key() == 16777223:
+                print(f"[DEBUG] Delete key detected in eventFilter!")
+                print(f"[DEBUG] Selected shape: {self.canvas.selected_shape}")
+                print(f"[DEBUG] Delete action enabled: {self.actions.delete.isEnabled()}")
+                
+                # 直接delete_selected_shapeを呼び出す
+                if self.canvas.selected_shape and self.actions.delete.isEnabled():
+                    print("[DEBUG] Calling delete_selected_shape directly from eventFilter")
+                    self.delete_selected_shape()
+                    return True  # Event handled
+                else:
+                    print("[DEBUG] Cannot delete: no shape selected or action disabled")
+                    return False
+            
+            # F1キー: Quick ID Selectorの表示/非表示 (Qt.Key_F1 = 16777264)
+            if event.key() == Qt.Key_F1 or event.key() == 16777264:
+                print(f"[DEBUG] F1 detected in eventFilter! Key code: {event.key()}")
+                self.toggle_quick_id_selector()
+                return True  # Event handled
+            
+            # 数字キー（1-9）: Quick ID直接選択
+            if (Qt.Key_1 <= event.key() <= Qt.Key_9) or (49 <= event.key() <= 57):
+                if Qt.Key_1 <= event.key() <= Qt.Key_9:
+                    id_num = event.key() - Qt.Key_0
+                else:
+                    id_num = event.key() - 48  # ASCII codes
+                print(f"[DEBUG] Number key {id_num} detected in eventFilter!")
+                self.select_quick_id(str(id_num))
+                return True  # Event handled
+            
+            # 0キー: ID 10を選択
+            elif event.key() == Qt.Key_0 or event.key() == 48:
+                print("[DEBUG] 0 key detected in eventFilter!")
+                self.select_quick_id("10")
+                return True  # Event handled
             
             # Check for Ctrl+Z
             if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Z:
@@ -978,6 +1070,9 @@ class MainWindow(QMainWindow, WindowMixin):
 
     # React to canvas signals.
     def shape_selection_changed(self, selected=False):
+        print(f"[DEBUG] shape_selection_changed called: selected={selected}")
+        print(f"[DEBUG] Canvas selected shape: {self.canvas.selected_shape}")
+        
         if self._no_selection_slot:
             self._no_selection_slot = False
         else:
@@ -986,7 +1081,11 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.shapes_to_items[shape].setSelected(True)
             else:
                 self.label_list.clearSelection()
-        self.actions.delete.setEnabled(selected)
+        
+        # selectedの値が正しくない可能性があるので、実際のshapeの状態に基づいて設定
+        has_selection = self.canvas.selected_shape is not None
+        self.actions.delete.setEnabled(has_selection)
+        print(f"[DEBUG] Delete action enabled set to: {has_selection}")
         self.actions.copy.setEnabled(selected)
         self.actions.edit.setEnabled(selected)
         self.actions.shapeLineColor.setEnabled(selected)
@@ -1839,14 +1938,26 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def delete_selected_shape(self):
         print("[DEBUG] delete_selected_shape called")
+        print(f"[DEBUG] Canvas selected shape: {self.canvas.selected_shape}")
+        print(f"[DEBUG] Delete action enabled: {self.actions.delete.isEnabled()}")
+        
+        if not self.canvas.selected_shape:
+            print("[DEBUG] No shape selected for deletion")
+            return
+            
         # Save state before deletion
         self.save_undo_state("delete_shape")
         
-        self.remove_label(self.canvas.delete_selected())
+        deleted_shape = self.canvas.delete_selected()
+        print(f"[DEBUG] Deleted shape: {deleted_shape}")
+        
+        self.remove_label(deleted_shape)
         self.set_dirty()
         if self.no_shapes():
             for action in self.actions.onShapesPresent:
                 action.setEnabled(False)
+        
+        print("[DEBUG] delete_selected_shape completed")
 
     def choose_shape_line_color(self):
         color = self.color_dialog.getColor(self.line_color, u'Choose Line Color',
@@ -2239,6 +2350,99 @@ class MainWindow(QMainWindow, WindowMixin):
         """Update the overwrite checkbox text with current IOU threshold."""
         threshold = self.bb_dup_iou_threshold.value()
         self.bb_dup_overwrite_checkbox.setText(f"重複時に上書き (IOU>{threshold:.1f})")
+    
+    # Quick ID Selector関連メソッド
+    def toggle_quick_id_selector(self):
+        """Quick ID Selectorの表示/非表示を切り替え"""
+        if self.quick_id_selector.isVisible():
+            self.quick_id_selector.hide()
+            print("[QuickID] ID Selector hidden")
+        else:
+            self.quick_id_selector.show()
+            print("[QuickID] ID Selector shown")
+    
+    def select_quick_id(self, id_str):
+        """Quick IDを選択"""
+        if id_str != self.current_quick_id:
+            self.current_quick_id = id_str
+            self.quick_id_selector.set_current_id(id_str)
+            
+            # ステータスバーの表示を更新
+            self.update_current_id_display()
+            
+            print(f"[QuickID] Selected ID: {id_str}")
+            
+            # 選択中のBBにIDを適用（必要に応じて）
+            self.apply_quick_id_to_selected_shape()
+    
+    def next_quick_id(self):
+        """次のIDに切り替え"""
+        current_num = int(self.current_quick_id)
+        max_ids = self.quick_id_selector.max_ids
+        next_num = current_num + 1 if current_num < max_ids else 1
+        self.select_quick_id(str(next_num))
+    
+    def prev_quick_id(self):
+        """前のIDに切り替え"""
+        current_num = int(self.current_quick_id)
+        max_ids = self.quick_id_selector.max_ids
+        prev_num = current_num - 1 if current_num > 1 else max_ids
+        self.select_quick_id(str(prev_num))
+    
+    def on_quick_id_selected(self, id_str):
+        """Quick ID Selectorからのシグナルを受信"""
+        self.current_quick_id = id_str
+        
+        # ステータスバーの表示を更新
+        self.update_current_id_display()
+        
+        print(f"[QuickID] ID selected from selector: {id_str}")
+        
+        # 選択中のBBにIDを適用
+        self.apply_quick_id_to_selected_shape()
+    
+    def update_current_id_display(self):
+        """ステータスバーの現在ID表示を更新"""
+        if hasattr(self, 'label_current_id'):
+            self.label_current_id.setText(f'ID: {self.current_quick_id}')
+            print(f"[QuickID] Status bar updated: ID {self.current_quick_id}")
+    
+    def apply_quick_id_to_selected_shape(self):
+        """選択中のBBに現在のQuick IDを適用"""
+        if self.canvas.selected_shape:
+            shape = self.canvas.selected_shape
+            
+            # Quick IDに対応するクラス名を取得
+            new_label = self.get_class_name_for_quick_id(self.current_quick_id)
+            
+            # ラベルを更新
+            old_label = shape.label
+            shape.label = new_label
+            
+            # UIを更新
+            self.set_dirty()
+            self.update_combo_box()
+            
+            print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}")
+            
+            # Undo用の状態保存
+            self.save_undo_state('quick_id_change')
+        else:
+            print("[QuickID] No shape selected for ID application")
+    
+    def get_class_name_for_quick_id(self, quick_id):
+        """Quick IDに対応するクラス名を取得"""
+        try:
+            id_num = int(quick_id)
+            if 1 <= id_num <= len(self.label_hist):
+                # 定義されたクラス名を使用
+                class_name = self.label_hist[id_num - 1]
+                return f"{class_name}_{quick_id.zfill(2)}"
+            else:
+                # 範囲外の場合はデフォルト
+                return f"object_{quick_id.zfill(2)}"
+        except (ValueError, IndexError):
+            return f"object_{quick_id.zfill(2)}"
     
     def calculate_iou(self, box1, box2):
         """Calculate Intersection over Union between two bounding boxes."""
