@@ -7,6 +7,7 @@ Memento Patternを使用したシンプルな実装
 
 import copy
 import json
+import time
 
 
 class UndoManager:
@@ -181,6 +182,7 @@ class MultiFrameOperation:
 class FrameUndoManager:
     """
     フレームごとに独立したUndo/Redo管理
+    統一履歴管理により、単一フレーム操作と複数フレーム操作を時系列で管理
     """
     
     def __init__(self, max_history_per_frame=30):
@@ -191,9 +193,11 @@ class FrameUndoManager:
         self.frame_managers = {}  # フレームパスごとのUndoManager
         self.max_history = max_history_per_frame
         self.current_frame = None
-        self.multi_frame_operations = []  # 複数フレーム操作の履歴
-        self.multi_frame_index = -1  # 現在の複数フレーム操作のインデックス
-        self.max_multi_frame_operations = 10  # 最大履歴数
+        
+        # 統一履歴管理
+        self.unified_history = []  # すべての操作を時系列で管理
+        self.unified_index = -1    # 現在の履歴インデックス
+        self.max_unified_history = 50  # 最大履歴数
     
     def get_manager(self, frame_path):
         """
@@ -214,34 +218,86 @@ class FrameUndoManager:
         self.current_frame = frame_path
     
     def save_state(self, state_data, operation_type="unknown"):
-        """現在のフレームの状態を保存"""
+        """現在のフレームの状態を保存（統一履歴に追加）"""
         if self.current_frame:
-            return self.get_manager(self.current_frame).save_state(state_data, operation_type)
+            # フレーム単体の履歴に保存
+            result = self.get_manager(self.current_frame).save_state(state_data, operation_type)
+            
+            # 統一履歴にも追加
+            if result:
+                self._add_to_unified_history({
+                    'type': 'single_frame',
+                    'frame_path': self.current_frame,
+                    'operation_type': operation_type,
+                    'timestamp': time.time()
+                })
+            
+            return result
         return False
     
     def undo(self):
-        """現在のフレームでUndo"""
-        if self.current_frame:
-            return self.get_manager(self.current_frame).undo()
+        """統一履歴から最新の操作をUndo"""
+        if not self.can_undo():
+            print("[UnifiedHistory] Cannot undo")
+            return None
+        
+        if self.unified_index < 0 or self.unified_index >= len(self.unified_history):
+            print("[UnifiedHistory] Invalid index")
+            return None
+        
+        operation = self.unified_history[self.unified_index]
+        self.unified_index -= 1
+        
+        print(f"[UnifiedHistory] Undoing {operation['type']} operation: {operation.get('operation_type', 'unknown')}")
+        
+        if operation['type'] == 'single_frame':
+            # 単一フレーム操作のUndo
+            frame_path = operation['frame_path']
+            if frame_path and frame_path in self.frame_managers:
+                manager = self.get_manager(frame_path)
+                if manager.can_undo():
+                    return manager.undo()
+        
+        elif operation['type'] == 'multi_frame':
+            # 複数フレーム操作のUndo
+            multi_op = operation['operation']
+            return self._undo_multi_frame_internal(multi_op)
+        
         return None
     
     def redo(self):
-        """現在のフレームでRedo"""
-        if self.current_frame:
-            return self.get_manager(self.current_frame).redo()
+        """統一履歴から次の操作をRedo"""
+        if not self.can_redo():
+            print("[UnifiedHistory] Cannot redo")
+            return None
+        
+        self.unified_index += 1
+        operation = self.unified_history[self.unified_index]
+        
+        print(f"[UnifiedHistory] Redoing {operation['type']} operation: {operation.get('operation_type', 'unknown')}")
+        
+        if operation['type'] == 'single_frame':
+            # 単一フレーム操作のRedo
+            frame_path = operation['frame_path']
+            if frame_path and frame_path in self.frame_managers:
+                manager = self.get_manager(frame_path)
+                if manager.can_redo():
+                    return manager.redo()
+        
+        elif operation['type'] == 'multi_frame':
+            # 複数フレーム操作のRedo
+            multi_op = operation['operation']
+            return self._redo_multi_frame_internal(multi_op)
+        
         return None
     
     def can_undo(self):
-        """現在のフレームでUndo可能かチェック"""
-        if self.current_frame:
-            return self.get_manager(self.current_frame).can_undo()
-        return False
+        """統一履歴でUndo可能かチェック"""
+        return self.unified_index >= 0
     
     def can_redo(self):
-        """現在のフレームでRedo可能かチェック"""
-        if self.current_frame:
-            return self.get_manager(self.current_frame).can_redo()
-        return False
+        """統一履歴でRedo可能かチェック"""
+        return self.unified_index < len(self.unified_history) - 1
 
     
     # ========== Multi-frame operation methods ==========
@@ -264,7 +320,7 @@ class FrameUndoManager:
     
     def save_multi_frame_operation(self, operation):
         """
-        複数フレーム操作を履歴に保存
+        複数フレーム操作を履歴に保存（統一履歴に追加）
         
         Args:
             operation: MultiFrameOperation object
@@ -273,36 +329,27 @@ class FrameUndoManager:
             print("[MultiFrame] No changes to save")
             return
         
-        # 現在位置より後の履歴を削除（redo履歴をクリア）
-        if self.multi_frame_index < len(self.multi_frame_operations) - 1:
-            self.multi_frame_operations = self.multi_frame_operations[:self.multi_frame_index + 1]
-        
-        # 操作を追加
-        self.multi_frame_operations.append(operation)
-        self.multi_frame_index += 1
-        
-        # 履歴サイズ制限
-        if len(self.multi_frame_operations) > self.max_multi_frame_operations:
-            self.multi_frame_operations.pop(0)
-            self.multi_frame_index -= 1
+        # 統一履歴に追加
+        self._add_to_unified_history({
+            'type': 'multi_frame',
+            'operation': operation,
+            'operation_type': operation.operation_type,
+            'timestamp': time.time()
+        })
         
         print(f"[MultiFrame] Saved {operation.operation_type} affecting {len(operation.frame_changes)} frames")
-        print(f"[MultiFrame] History size: {len(self.multi_frame_operations)}, Index: {self.multi_frame_index}")
+        print(f"[UnifiedHistory] History size: {len(self.unified_history)}, Index: {self.unified_index}")
     
-    def undo_multi_frame(self):
+    def _undo_multi_frame_internal(self, operation):
         """
-        複数フレーム操作のUndo
+        複数フレーム操作のUndo（内部処理）
         
+        Args:
+            operation: MultiFrameOperation object
+            
         Returns:
             Undone operation or None
         """
-        if not self.can_undo_multi_frame():
-            print("[MultiFrame] Cannot undo multi-frame operation")
-            return None
-        
-        operation = self.multi_frame_operations[self.multi_frame_index]
-        self.multi_frame_index -= 1
-        
         print(f"[MultiFrame] Undoing {operation.operation_type} affecting {len(operation.frame_changes)} frames")
         
         # 各フレームを前の状態に戻す
@@ -320,20 +367,16 @@ class FrameUndoManager:
         
         return operation
     
-    def redo_multi_frame(self):
+    def _redo_multi_frame_internal(self, operation):
         """
-        複数フレーム操作のRedo
+        複数フレーム操作のRedo（内部処理）
         
+        Args:
+            operation: MultiFrameOperation object
+            
         Returns:
             Redone operation or None
         """
-        if not self.can_redo_multi_frame():
-            print("[MultiFrame] Cannot redo multi-frame operation")
-            return None
-        
-        self.multi_frame_index += 1
-        operation = self.multi_frame_operations[self.multi_frame_index]
-        
         print(f"[MultiFrame] Redoing {operation.operation_type} affecting {len(operation.frame_changes)} frames")
         
         # 各フレームを後の状態に戻す
@@ -351,14 +394,43 @@ class FrameUndoManager:
         
         return operation
     
+    def _add_to_unified_history(self, operation_info):
+        """
+        統一履歴に操作を追加
+        
+        Args:
+            operation_info: 操作情報の辞書
+        """
+        # Redo履歴をクリア
+        if self.unified_index < len(self.unified_history) - 1:
+            self.unified_history = self.unified_history[:self.unified_index + 1]
+        
+        # 操作を追加
+        self.unified_history.append(operation_info)
+        self.unified_index += 1
+        
+        # 履歴サイズ制限
+        if len(self.unified_history) > self.max_unified_history:
+            self.unified_history.pop(0)
+            self.unified_index -= 1
+        
+        print(f"[UnifiedHistory] Added {operation_info['type']} operation, History: {len(self.unified_history)}, Index: {self.unified_index}")
+    
+    # 互換性のために古いメソッドを残す（deprecated）
     def can_undo_multi_frame(self):
-        """複数フレーム操作のUndo可能かチェック"""
-        return self.multi_frame_index >= 0
+        """複数フレーム操作のUndo可能かチェック（deprecated）"""
+        # 統一履歴で管理するため、常にFalseを返す
+        return False
     
     def can_redo_multi_frame(self):
-        """複数フレーム操作のRedo可能かチェック"""
-        return self.multi_frame_index < len(self.multi_frame_operations) - 1
+        """複数フレーム操作のRedo可能かチェック（deprecated）"""
+        # 統一履歴で管理するため、常にFalseを返す
+        return False
     
-    def has_multi_frame_operations(self):
-        """複数フレーム操作の履歴があるかチェック"""
-        return len(self.multi_frame_operations) > 0
+    def undo_multi_frame(self):
+        """複数フレーム操作のUndo（deprecated - 統一undoを使用）"""
+        return self.undo()
+    
+    def redo_multi_frame(self):
+        """複数フレーム操作のRedo（deprecated - 統一redoを使用）"""
+        return self.redo()

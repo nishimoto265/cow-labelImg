@@ -1,4 +1,4 @@
-# Undo/Redo機能 要件定義書
+# Undo/Redo機能 要件定義書（統一履歴管理版）
 
 ## 概要
 labelImgアプリケーションに統一的なUndo/Redo機能を実装する。全ての操作を一貫した方法で管理し、ユーザーが直感的に操作を取り消し・やり直しできるようにする。
@@ -34,73 +34,111 @@ labelImgアプリケーションに統一的なUndo/Redo機能を実装する。
 ## 技術設計
 
 ### 1. アーキテクチャ
-**Memento Pattern**を採用し、シンプルで拡張性のある実装とする。
+**Memento Pattern**と**統一履歴管理**を採用し、すべての操作を時系列で一元管理する。
 
 ```python
-class UndoManager:
-    def __init__(self, max_history=50):
-        self.history = []        # 履歴スタック
-        self.current_index = -1  # 現在の位置
+class FrameUndoManager:
+    def __init__(self, max_history_per_frame=30):
+        # フレーム別履歴（既存機能との互換性）
+        self.frame_managers = {}  
         
-    def save_state(self, state):
-        # 現在の状態を保存
+        # 統一履歴管理（新機能）
+        self.unified_history = []  # すべての操作を時系列で管理
+        self.unified_index = -1    # 現在の履歴インデックス
+        self.max_unified_history = 50
+        
+    def save_state(self, state_data, operation_type):
+        # フレーム履歴とグローバル履歴の両方に保存
         
     def undo(self):
-        # 一つ前の状態に戻す
+        # 統一履歴から最新の操作を取り消す
         
     def redo(self):
-        # 一つ後の状態に進む
+        # 統一履歴から次の操作を再実行
 ```
 
-### 2. 状態データ構造
+### 2. 統一履歴データ構造
 ```python
+# 単一フレーム操作
 {
-    'frame_index': int,           # フレーム番号
-    'file_path': str,             # ファイルパス
-    'shapes': [                   # BBリスト
+    'type': 'single_frame',
+    'frame_path': str,           # 対象フレーム
+    'operation_type': str,       # 'add_shape', 'delete_shape'等
+    'timestamp': float           # 操作時刻
+}
+
+# 複数フレーム操作
+{
+    'type': 'multi_frame',
+    'operation': MultiFrameOperation,  # BB複製等の詳細情報
+    'operation_type': str,       # 'bb_duplication'等
+    'timestamp': float           # 操作時刻
+}
+
+# フレーム状態データ
+{
+    'frame_index': int,
+    'file_path': str,
+    'shapes': [                  # BBリスト
         {
-            'points': [(x,y), ...],  # 座標
-            'label': str,            # ラベル
-            'track_id': int,         # トラッキングID
-            'difficult': bool,       # 難易度フラグ
-            'attributes': {}         # その他属性
+            'points': [(x,y), ...],
+            'label': str,
+            'track_id': int,
+            'difficult': bool,
+            'attributes': {}
         }
-    ],
-    'operation_type': str         # 操作タイプ（デバッグ用）
+    ]
 }
 ```
 
 ### 3. 実装方針
-1. **統一インターフェース**: 全ての操作を同じ方法で処理
-2. **Deep Copy**: 状態保存時は完全なコピーを作成
-3. **メモリ管理**: 履歴サイズを制限してメモリ使用量を抑制
-4. **パフォーマンス**: 大量のBBがある場合も高速に動作
+1. **統一履歴管理**: 単一・複数フレーム操作を時系列で一元管理
+2. **操作タイプの分離**: 各操作タイプに応じた適切なUndo/Redo処理
+3. **Deep Copy**: 状態保存時は完全なコピーを作成
+4. **メモリ管理**: 履歴サイズを制限してメモリ使用量を抑制
+5. **後方互換性**: 既存のフレーム別履歴も維持
 
 ## 実装計画
 
-### Phase 1: 基本実装
-1. UndoManagerクラスの作成
-2. 単一フレーム操作への適用
-3. キーボードショートカットの実装
+### Phase 1: 統一履歴管理の導入 ✅
+1. FrameUndoManagerクラスの拡張
+2. 統一履歴（unified_history）の実装
+3. 時系列での操作管理
 
-### Phase 2: 複数フレーム対応
-1. 複数フレーム操作の状態管理
-2. フレーム切り替え時の履歴管理
-3. 複雑な操作のグループ化
+### Phase 2: 統一Undo/Redoの実装 ✅
+1. undo_action/redo_actionの統一化
+2. 単一・複数フレーム操作の判別処理
+3. 適切な復元処理の実装
 
-### Phase 3: 最適化とテスト
-1. パフォーマンス最適化
+### Phase 3: テストと最適化
+1. 操作シーケンスの動作確認
 2. エッジケースの処理
-3. ユーザビリティテスト
+3. パフォーマンス最適化
 
 ## 注意事項
 - ファイル保存時は履歴をクリアしない
 - フレーム切り替え時は各フレームの履歴を保持
 - 自動保存との競合を避ける実装
 - エラー時は安全側に倒す（データ損失を防ぐ）
+- **統一履歴**: 単一・複数フレーム操作を時系列で管理
+- **後方互換性**: 既存のフレーム別履歴機能も維持
 
 ## 成功基準
-- 全ての操作がUndo/Redo可能
-- 操作が直感的で分かりやすい
-- パフォーマンスが良好（遅延なし）
-- バグやデータ損失がない
+- **直感的なUndo動作**: Ctrl+Zで常に最新の操作が取り消される
+- **混在操作の正しい処理**: BB複製後の通常BB作成→Ctrl+Zで通常BBのみ消える
+- **全操作のサポート**: 単一・複数フレーム操作すべてがUndo/Redo可能
+- **パフォーマンス**: 遅延なく動作
+- **データ整合性**: バグやデータ損失がない
+
+## 修正内容（2024年版）
+
+### 問題の解決
+✅ **統一履歴管理の導入**: 単一・複数フレーム操作を時系列で一元管理
+✅ **優先度問題の解決**: Multi-frame undoが不適切に優先される問題を修正
+✅ **直感的な動作**: 最新の操作から順番にUndo/Redoされる
+
+### 技術的変更点
+- `unified_history`配列による時系列管理
+- `can_undo_multi_frame()`の非推奨化
+- `undo_action()`の統一化処理
+- タイムスタンプベースの操作順序管理

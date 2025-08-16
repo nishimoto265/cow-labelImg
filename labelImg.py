@@ -2158,13 +2158,9 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Update button states
         if hasattr(self.actions, 'undo') and self.actions.undo:
-            self.actions.undo.setEnabled(
-                self.undo_manager.can_undo_multi_frame() or self.undo_manager.can_undo()
-            )
+            self.actions.undo.setEnabled(self.undo_manager.can_undo())
         if hasattr(self.actions, 'redo') and self.actions.redo:
-            self.actions.redo.setEnabled(
-                self.undo_manager.can_redo_multi_frame() or self.undo_manager.can_redo()
-            )
+            self.actions.redo.setEnabled(self.undo_manager.can_redo())
     
     def redo_multi_frame_operation(self):
         """複数フレーム操作のRedo"""
@@ -2204,13 +2200,9 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Update button states
         if hasattr(self.actions, 'undo') and self.actions.undo:
-            self.actions.undo.setEnabled(
-                self.undo_manager.can_undo_multi_frame() or self.undo_manager.can_undo()
-            )
+            self.actions.undo.setEnabled(self.undo_manager.can_undo())
         if hasattr(self.actions, 'redo') and self.actions.redo:
-            self.actions.redo.setEnabled(
-                self.undo_manager.can_redo_multi_frame() or self.undo_manager.can_redo()
-            )
+            self.actions.redo.setEnabled(self.undo_manager.can_redo())
 
     def toggle_draw_square(self):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())
