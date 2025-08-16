@@ -119,7 +119,11 @@ class YoloReader:
         self.shapes.append((label, points, None, None, difficult))
 
     def yolo_line_to_shape(self, class_index, x_center, y_center, w, h):
-        label = self.classes[int(class_index)]
+        class_idx = int(class_index)
+        if class_idx >= len(self.classes):
+            print(f"[YOLO] Warning: Class index {class_idx} out of range (max: {len(self.classes)-1}), using index 0")
+            class_idx = 0
+        label = self.classes[class_idx]
 
         x_min = max(float(x_center) - float(w) / 2, 0)
         x_max = min(float(x_center) + float(w) / 2, 1)

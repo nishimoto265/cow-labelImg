@@ -680,7 +680,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.statusBar().addPermanentWidget(self.label_coordinates)
         
         # Display current Quick ID at the right of status bar
-        self.label_current_id = QLabel('ID: 1')
+        # 初期化時は実際のクラス名を表示
+        initial_class = self.label_hist[0] if self.label_hist else "cow"
+        self.label_current_id = QLabel(initial_class)
         self.label_current_id.setStyleSheet("""
             QLabel {
                 background-color: #0066cc;
@@ -742,14 +744,19 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def wheelEvent(self, event):
         """マウスホイールイベント処理"""
+        print(f"[DEBUG] wheelEvent called: modifiers={event.modifiers()}, delta={event.angleDelta().y()}")
+        
         # Shift+ホイール: Quick ID切り替え
         if event.modifiers() == Qt.ShiftModifier:
+            print("[DEBUG] Shift modifier detected in wheelEvent")
             delta = event.angleDelta().y()
             if delta > 0:
                 # 上スクロール: 前のIDへ
+                print("[DEBUG] Wheel up - calling prev_quick_id")
                 self.prev_quick_id()
             elif delta < 0:
                 # 下スクロール: 次のIDへ
+                print("[DEBUG] Wheel down - calling next_quick_id")
                 self.next_quick_id()
             event.accept()
             return
@@ -809,6 +816,22 @@ class MainWindow(QMainWindow, WindowMixin):
             if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Y:
                 print("[DEBUG] Ctrl+Y detected in eventFilter!")
                 self.redo_action()
+                return True  # Event handled
+        
+        # ホイールイベントをeventFilterでもキャッチ
+        elif event.type() == event.Wheel:
+            print(f"[DEBUG] eventFilter caught Wheel: modifiers={event.modifiers()}, delta={event.angleDelta().y()}")
+            
+            # Shift+ホイール: Quick ID切り替え
+            if event.modifiers() == Qt.ShiftModifier:
+                print("[DEBUG] Shift+wheel detected in eventFilter!")
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    print("[DEBUG] Wheel up - calling prev_quick_id")
+                    self.prev_quick_id()
+                elif delta < 0:
+                    print("[DEBUG] Wheel down - calling next_quick_id")
+                    self.next_quick_id()
                 return True  # Event handled
         
         # Pass event to parent
@@ -2365,6 +2388,8 @@ class MainWindow(QMainWindow, WindowMixin):
         """Quick IDを選択"""
         if id_str != self.current_quick_id:
             self.current_quick_id = id_str
+            
+            # フローティングウィンドウの選択状態を更新
             self.quick_id_selector.set_current_id(id_str)
             
             # ステータスバーの表示を更新
@@ -2378,15 +2403,19 @@ class MainWindow(QMainWindow, WindowMixin):
     def next_quick_id(self):
         """次のIDに切り替え"""
         current_num = int(self.current_quick_id)
-        max_ids = self.quick_id_selector.max_ids
+        # 実際に利用可能なIDの数を使用
+        max_ids = len(self.label_hist)
         next_num = current_num + 1 if current_num < max_ids else 1
+        print(f"[QuickID] next_quick_id: {current_num} -> {next_num} (max: {max_ids})")
         self.select_quick_id(str(next_num))
     
     def prev_quick_id(self):
         """前のIDに切り替え"""
         current_num = int(self.current_quick_id)
-        max_ids = self.quick_id_selector.max_ids
+        # 実際に利用可能なIDの数を使用
+        max_ids = len(self.label_hist)
         prev_num = current_num - 1 if current_num > 1 else max_ids
+        print(f"[QuickID] prev_quick_id: {current_num} -> {prev_num} (max: {max_ids})")
         self.select_quick_id(str(prev_num))
     
     def on_quick_id_selected(self, id_str):
@@ -2404,15 +2433,17 @@ class MainWindow(QMainWindow, WindowMixin):
     def update_current_id_display(self):
         """ステータスバーの現在ID表示を更新"""
         if hasattr(self, 'label_current_id'):
-            self.label_current_id.setText(f'ID: {self.current_quick_id}')
-            print(f"[QuickID] Status bar updated: ID {self.current_quick_id}")
+            # 実際のクラス名を取得して表示
+            class_name = self.get_class_name_for_quick_id(self.current_quick_id)
+            self.label_current_id.setText(f'{class_name}')
+            print(f"[QuickID] Status bar updated: {class_name}")
     
     def apply_quick_id_to_selected_shape(self):
         """選択中のBBに現在のQuick IDを適用"""
         if self.canvas.selected_shape:
             shape = self.canvas.selected_shape
             
-            # Quick IDに対応するクラス名を取得
+            # Quick IDに対応する実際のクラス名を取得（IDサフィックスなし）
             new_label = self.get_class_name_for_quick_id(self.current_quick_id)
             
             # ラベルを更新
@@ -2431,18 +2462,18 @@ class MainWindow(QMainWindow, WindowMixin):
             print("[QuickID] No shape selected for ID application")
     
     def get_class_name_for_quick_id(self, quick_id):
-        """Quick IDに対応するクラス名を取得"""
+        """Quick IDに対応するクラス名を取得（classes.txtから直接）"""
         try:
             id_num = int(quick_id)
             if 1 <= id_num <= len(self.label_hist):
-                # 定義されたクラス名を使用
+                # 定義されたクラス名をそのまま使用（IDサフィックスなし）
                 class_name = self.label_hist[id_num - 1]
-                return f"{class_name}_{quick_id.zfill(2)}"
+                return class_name
             else:
                 # 範囲外の場合はデフォルト
-                return f"object_{quick_id.zfill(2)}"
+                return "object"
         except (ValueError, IndexError):
-            return f"object_{quick_id.zfill(2)}"
+            return "object"
     
     def calculate_iou(self, box1, box2):
         """Calculate Intersection over Union between two bounding boxes."""

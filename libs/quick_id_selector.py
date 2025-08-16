@@ -45,9 +45,7 @@ class QuickIDSelector(QDialog):
         self.init_ui()
         self.setup_styles()
         
-        # ドラッグ用の変数
-        self.dragging = False
-        self.drag_position = QPoint()
+        # リサイズ可能なウィンドウなので、ドラッグ機能は不要
         
     def init_ui(self):
         """UIの初期化"""
@@ -55,7 +53,6 @@ class QuickIDSelector(QDialog):
         self.setWindowTitle("クイックID選択")
         self.setWindowFlags(
             Qt.Dialog | 
-            Qt.FramelessWindowHint | 
             Qt.WindowStaysOnTopHint |
             Qt.Tool
         )
@@ -67,64 +64,47 @@ class QuickIDSelector(QDialog):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(4)
         
-        # ヘッダー部分
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # タイトルラベル
-        title_label = QLabel("クイックID選択")
-        title_label.setObjectName("titleLabel")
-        header_layout.addWidget(title_label)
-        
-        header_layout.addStretch()
-        
-        # 閉じるボタン
-        close_btn = QPushButton("×")
-        close_btn.setObjectName("closeButton")
-        close_btn.setFixedSize(20, 20)
-        close_btn.clicked.connect(self.hide)
-        header_layout.addWidget(close_btn)
-        
-        main_layout.addLayout(header_layout)
-        
-        # ID選択エリア
+        # ID選択エリアのみ
         self.create_id_selection_area(main_layout)
-        
-        # コントロールエリア
-        self.create_control_area(main_layout)
         
         self.setLayout(main_layout)
         
-        # 初期サイズ設定
-        self.setFixedSize(280, 320)
+        # 初期サイズ設定（全てのIDボタンが見えるように）
+        # 20個のクラス名 ÷ 4列 = 5行、各ボタン高さ35px + スペース
+        self.resize(400, 220)
+        self.setMinimumSize(320, 180)
         
     def create_id_selection_area(self, parent_layout):
         """ID選択ボタンエリアの作成"""
-        # スクロールエリア
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(200)
-        scroll_area.setObjectName("idScrollArea")
-        
-        # ID選択ウィジェット
-        id_widget = QWidget()
+        # 直接グリッドレイアウトを使用（スクロールエリアなし）
         id_layout = QGridLayout()
-        id_layout.setSpacing(2)
-        id_widget.setLayout(id_layout)
+        id_layout.setSpacing(3)
         
-        # IDボタンを作成（5列のグリッド）
-        cols = 5
-        for i in range(1, self.max_ids + 1):
+        # IDボタンを作成（4列のグリッド）
+        cols = 4
+        for i in range(1, min(self.max_ids + 1, len(self.class_names) + 1)):
             id_str = str(i)
             row = (i - 1) // cols
             col = (i - 1) % cols
             
-            btn = QPushButton(id_str)
-            btn.setFixedSize(45, 30)
+            # ボタンテキスト：クラス名のみ表示
+            if i <= len(self.class_names):
+                class_name = self.class_names[i - 1]
+                btn_text = class_name
+                btn = QPushButton(btn_text)
+                # クラス名の長さに応じてサイズ調整
+                btn.setMinimumSize(70, 35)
+                btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            else:
+                btn_text = id_str
+                btn = QPushButton(btn_text)
+                btn.setMinimumSize(45, 35)
+                btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            
             btn.setObjectName("idButton")
             btn.clicked.connect(lambda checked, id_val=id_str: self.select_id(id_val))
             
-            # ツールチップにクラス名を表示
+            # ツールチップ
             if i <= len(self.class_names):
                 class_name = self.class_names[i - 1]
                 if i <= 9:
@@ -140,44 +120,12 @@ class QuickIDSelector(QDialog):
             self.id_buttons[id_str] = btn
             id_layout.addWidget(btn, row, col)
         
-        scroll_area.setWidget(id_widget)
-        parent_layout.addWidget(scroll_area)
+        # グリッドレイアウトを直接メインレイアウトに追加
+        parent_layout.addLayout(id_layout)
         
         # 初期選択状態を設定
         self.update_button_states()
         
-    def create_control_area(self, parent_layout):
-        """コントロールエリアの作成"""
-        control_layout = QVBoxLayout()
-        control_layout.setSpacing(4)
-        
-        # 現在のID表示
-        current_id_layout = QHBoxLayout()
-        current_id_layout.addWidget(QLabel("現在のID:"))
-        
-        self.current_id_label = QLabel(self.current_id)
-        self.current_id_label.setObjectName("currentIdLabel")
-        current_id_layout.addWidget(self.current_id_label)
-        current_id_layout.addStretch()
-        
-        control_layout.addLayout(current_id_layout)
-        
-        # 操作説明
-        help_layout = QVBoxLayout()
-        help_text = QLabel(
-            "操作:\n"
-            "• 1-9キー: 直接ID選択\n"
-            "• Shift+ホイール: ID切り替え\n"
-            "• F1: 表示/非表示\n"
-            "• ドラッグ: ウィンドウ移動"
-        )
-        help_text.setObjectName("helpText")
-        help_text.setWordWrap(True)
-        help_layout.addWidget(help_text)
-        
-        control_layout.addLayout(help_layout)
-        
-        parent_layout.addLayout(control_layout)
         
     def setup_styles(self):
         """スタイルシートの設定"""
@@ -186,32 +134,6 @@ class QuickIDSelector(QDialog):
                 background-color: rgba(240, 240, 240, 230);
                 border: 2px solid #666;
                 border-radius: 8px;
-            }
-            
-            #titleLabel {
-                font-weight: bold;
-                font-size: 12px;
-                color: #333;
-                padding: 2px;
-            }
-            
-            #closeButton {
-                background-color: #ff5555;
-                border: none;
-                border-radius: 10px;
-                color: white;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            
-            #closeButton:hover {
-                background-color: #ff3333;
-            }
-            
-            #idScrollArea {
-                background-color: rgba(255, 255, 255, 200);
-                border: 1px solid #ccc;
-                border-radius: 4px;
             }
             
             #idButton {
@@ -230,32 +152,12 @@ class QuickIDSelector(QDialog):
             #idButton:pressed {
                 background-color: rgba(150, 200, 255, 200);
             }
-            
-            #currentIdLabel {
-                font-weight: bold;
-                font-size: 14px;
-                color: #0066cc;
-                padding: 2px 8px;
-                background-color: rgba(255, 255, 255, 150);
-                border: 1px solid #0066cc;
-                border-radius: 4px;
-            }
-            
-            #helpText {
-                font-size: 10px;
-                color: #666;
-                background-color: rgba(255, 255, 255, 100);
-                padding: 4px;
-                border-radius: 4px;
-                border: 1px solid #ddd;
-            }
         """)
         
     def select_id(self, id_str):
         """IDを選択"""
         if id_str != self.current_id:
             self.current_id = id_str
-            self.current_id_label.setText(id_str)
             self.update_button_states()
             
             # シグナルを発信
@@ -278,9 +180,17 @@ class QuickIDSelector(QDialog):
         return self.current_id
         
     def set_current_id(self, id_str):
-        """外部からIDを設定"""
-        if id_str in self.id_buttons:
-            self.select_id(id_str)
+        """外部からIDを設定（シグナル発火なし）"""
+        print(f"[QuickIDSelector] set_current_id called with: {id_str}")
+        print(f"[QuickIDSelector] Available buttons: {list(self.id_buttons.keys())}")
+        
+        if id_str in self.id_buttons and id_str != self.current_id:
+            self.current_id = id_str
+            self.update_button_states()
+            print(f"[QuickIDSelector] ID set externally: {id_str}")
+        else:
+            print(f"[QuickIDSelector] Cannot set ID {id_str}: not in buttons or same as current")
+    
             
     def next_id(self):
         """次のIDに切り替え"""
@@ -318,22 +228,7 @@ class QuickIDSelector(QDialog):
             
         super().keyPressEvent(event)
         
-    def mousePressEvent(self, event):
-        """マウス押下でドラッグ開始"""
-        if event.button() == Qt.LeftButton:
-            self.dragging = True
-            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
-            event.accept()
-            
-    def mouseMoveEvent(self, event):
-        """ドラッグ中の移動"""
-        if event.buttons() == Qt.LeftButton and self.dragging:
-            self.move(event.globalPos() - self.drag_position)
-            event.accept()
-            
-    def mouseReleaseEvent(self, event):
-        """ドラッグ終了"""
-        self.dragging = False
+    # ドラッグ機能は削除（通常のウィンドウとして動作）
         
     def showEvent(self, event):
         """表示時の処理"""

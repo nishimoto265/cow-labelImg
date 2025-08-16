@@ -4,7 +4,7 @@
 Set-Location -Path $PSScriptRoot
 
 # Configuration
-$IMAGE_DIR = "D:\datasets\test_images\right_images_1fps_masked\2025-04-01-14"
+$IMAGE_DIR = "D:\test_images\right_images_1fps_masked\2025-04-01-14"
 $CLASSES_FILE = "D:\outputs\right\2025-04-01-14\annotations\ID\classes.txt"
 $ANNOTATION_DIR = "D:\outputs\right\2025-04-01-14\annotations\ID"
 
