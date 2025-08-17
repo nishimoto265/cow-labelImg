@@ -6,7 +6,8 @@ Quick ID Selector - フローティングID選択ウィンドウ
 """
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QGridLayout, QPushButton, QSizePolicy
+    QDialog, QVBoxLayout, QGridLayout, QPushButton, QSizePolicy,
+    QLabel, QWidget, QFrame
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint
 from PyQt5.QtGui import QKeyEvent
@@ -26,9 +27,9 @@ class QuickIDSelector(QDialog):
     BUTTON_MIN_WIDTH = 70
     BUTTON_MIN_HEIGHT = 35
     WINDOW_WIDTH = 400
-    WINDOW_HEIGHT = 220
+    WINDOW_HEIGHT = 300
     WINDOW_MIN_WIDTH = 320
-    WINDOW_MIN_HEIGHT = 180
+    WINDOW_MIN_HEIGHT = 250
     
     # Styles
     SELECTED_BUTTON_STYLE = """
@@ -114,6 +115,16 @@ class QuickIDSelector(QDialog):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(4)
         
+        # 不足ラベル表示エリア
+        self.missing_labels_widget = self._create_missing_labels_widget()
+        main_layout.addWidget(self.missing_labels_widget)
+        
+        # 区切り線
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        main_layout.addWidget(separator)
+        
         # ID選択ボタングリッド
         id_grid = self._create_id_grid()
         main_layout.addLayout(id_grid)
@@ -122,6 +133,36 @@ class QuickIDSelector(QDialog):
         
         # 初期選択状態を設定
         self._update_button_states()
+    
+    def _create_missing_labels_widget(self):
+        """不足ラベル表示ウィジェットを作成"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        
+        # タイトルラベル
+        title_label = QLabel("不足ラベル:")
+        title_label.setStyleSheet("font-weight: bold; color: #666;")
+        layout.addWidget(title_label)
+        
+        # 不足ラベル表示用のラベル
+        self.missing_labels_text = QLabel("なし")
+        self.missing_labels_text.setWordWrap(True)
+        self.missing_labels_text.setStyleSheet("""
+            QLabel {
+                background-color: rgba(255, 255, 200, 180);
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 4px;
+                color: #333;
+                min-height: 30px;
+            }
+        """)
+        layout.addWidget(self.missing_labels_text)
+        
+        widget.setLayout(layout)
+        return widget
     
     def _create_id_grid(self):
         """ID選択ボタングリッドを作成"""
@@ -282,6 +323,68 @@ class QuickIDSelector(QDialog):
         
         super().keyPressEvent(event)
     
+    def update_missing_labels(self, current_frame_labels=None):
+        """
+        不足ラベルを更新
+        
+        Args:
+            current_frame_labels: 現在のフレームに存在するラベルのリスト
+        """
+        if not self.class_names:
+            self.missing_labels_text.setText("クラス定義なし")
+            return
+        
+        if current_frame_labels is None:
+            # 親ウィンドウから現在のフレームのラベルを取得
+            current_frame_labels = self._get_current_frame_labels()
+        
+        # 不足しているラベルを検出
+        existing_labels = set(current_frame_labels) if current_frame_labels else set()
+        all_labels = set(self.class_names)
+        missing_labels = all_labels - existing_labels
+        
+        if missing_labels:
+            # 不足ラベルをソートして表示
+            sorted_missing = sorted(missing_labels, key=lambda x: self.class_names.index(x))
+            # インデックス番号も表示
+            missing_with_index = []
+            for label in sorted_missing:
+                index = self.class_names.index(label) + 1
+                missing_with_index.append(f"{index}:{label}")
+            
+            display_text = ", ".join(missing_with_index)
+            self.missing_labels_text.setText(display_text)
+            self.missing_labels_text.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(255, 220, 200, 180);
+                    border: 1px solid #f88;
+                    border-radius: 4px;
+                    padding: 4px;
+                    color: #800;
+                    min-height: 30px;
+                }
+            """)
+        else:
+            self.missing_labels_text.setText("すべて存在")
+            self.missing_labels_text.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(200, 255, 200, 180);
+                    border: 1px solid #8f8;
+                    border-radius: 4px;
+                    padding: 4px;
+                    color: #080;
+                    min-height: 30px;
+                }
+            """)
+    
+    def _get_current_frame_labels(self):
+        """親ウィンドウから現在のフレームのラベルを取得"""
+        if self.parent_window and hasattr(self.parent_window, 'canvas'):
+            canvas = self.parent_window.canvas
+            if hasattr(canvas, 'shapes'):
+                return [shape.label for shape in canvas.shapes if shape.label]
+        return []
+    
     def showEvent(self, event):
         """
         ウィンドウ表示時の処理
@@ -290,6 +393,9 @@ class QuickIDSelector(QDialog):
             event: 表示イベント
         """
         super().showEvent(event)
+        
+        # 不足ラベルを更新
+        self.update_missing_labels()
         
         # 親ウィンドウの中央上部に配置
         if self.parent_window:

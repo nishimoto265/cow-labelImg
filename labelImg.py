@@ -1098,6 +1098,10 @@ class MainWindow(QMainWindow, WindowMixin):
         for action in self.actions.onShapesPresent:
             action.setEnabled(True)
         self.update_combo_box()
+        
+        # Quick ID Selectorの不足ラベルを更新
+        if hasattr(self, 'quick_id_selector') and self.quick_id_selector.isVisible():
+            self.quick_id_selector.update_missing_labels()
 
     def remove_label(self, shape):
         if shape is None:
@@ -1483,6 +1487,10 @@ class MainWindow(QMainWindow, WindowMixin):
             self.add_recent_file(self.file_path)
             self.toggle_actions(True)
             self.show_bounding_box_from_annotation_file(self.file_path)
+            
+            # Quick ID Selectorの不足ラベルを更新
+            if hasattr(self, 'quick_id_selector') and self.quick_id_selector.isVisible():
+                self.quick_id_selector.update_missing_labels()
 
             counter = self.counter_str()
             self.setWindowTitle(__appname__ + ' ' + file_path + ' ' + counter)
@@ -1965,6 +1973,10 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.no_shapes():
             for action in self.actions.onShapesPresent:
                 action.setEnabled(False)
+        
+        # Quick ID Selectorの不足ラベルを更新
+        if hasattr(self, 'quick_id_selector') and self.quick_id_selector.isVisible():
+            self.quick_id_selector.update_missing_labels()
 
     def choose_shape_line_color(self):
         color = self.color_dialog.getColor(self.line_color, u'Choose Line Color',
