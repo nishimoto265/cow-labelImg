@@ -415,8 +415,6 @@ class MainWindow(QMainWindow, WindowMixin):
                         'w', 'new', get_str('crtBoxDetail'), enabled=False)
         delete = action(get_str('delBox'), self.delete_selected_shape,
                         'Delete', 'delete', get_str('delBoxDetail'), enabled=False)
-        print(f"[DEBUG] Delete action created: {delete}")
-        print(f"[DEBUG] Delete action shortcut: {delete.shortcut().toString()}")
         copy = action(get_str('dupBox'), self.copy_selected_shape,
                       'Ctrl+D', 'copy', get_str('dupBoxDetail'),
                       enabled=False)
@@ -704,9 +702,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.canvas.set_drawing_shape_to_square(False)
 
     def keyPressEvent(self, event):
-        print(f"[DEBUG] keyPressEvent: key={event.key()}, modifiers={event.modifiers()}")
-        print(f"[DEBUG] Qt.Key_Z={Qt.Key_Z}, Qt.Key_Y={Qt.Key_Y}, Qt.ControlModifier={Qt.ControlModifier}")
-        
         # F1キー: Quick ID Selectorの表示/非表示
         if event.key() == Qt.Key_F1:
             self.toggle_quick_id_selector()
@@ -723,118 +718,77 @@ class MainWindow(QMainWindow, WindowMixin):
             self.select_quick_id("10")
             return
         
-        # Check for Ctrl+Z
-        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Z:
-            print("[DEBUG] Ctrl+Z detected in keyPressEvent")
-            self.undo_action()
-            return
-        
-        # Check for Ctrl+Y
-        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Y:
-            print("[DEBUG] Ctrl+Y detected in keyPressEvent")
-            self.redo_action()
-            return
+        # Ctrl+Z/Y
+        if event.modifiers() == Qt.ControlModifier:
+            if event.key() == Qt.Key_Z:
+                self.undo_action()
+                return
+            elif event.key() == Qt.Key_Y:
+                self.redo_action()
+                return
         
         if event.key() == Qt.Key_Control:
-            # Draw rectangle if Ctrl is pressed
             self.canvas.set_drawing_shape_to_square(True)
         
-        # Call parent implementation for other key events
         super(MainWindow, self).keyPressEvent(event)
 
     def wheelEvent(self, event):
         """マウスホイールイベント処理"""
-        print(f"[DEBUG] wheelEvent called: modifiers={event.modifiers()}, delta={event.angleDelta().y()}")
-        
         # Shift+ホイール: Quick ID切り替え
         if event.modifiers() == Qt.ShiftModifier:
-            print("[DEBUG] Shift modifier detected in wheelEvent")
             delta = event.angleDelta().y()
             if delta > 0:
-                # 上スクロール: 前のIDへ
-                print("[DEBUG] Wheel up - calling prev_quick_id")
                 self.prev_quick_id()
             elif delta < 0:
-                # 下スクロール: 次のIDへ
-                print("[DEBUG] Wheel down - calling next_quick_id")
                 self.next_quick_id()
             event.accept()
             return
         
-        # 通常のホイールイベントは親クラスに委譲
         super(MainWindow, self).wheelEvent(event)
 
     def eventFilter(self, obj, event):
         """Global event filter to catch keyboard shortcuts"""
         if event.type() == event.KeyPress:
-            print(f"[DEBUG] eventFilter caught KeyPress: key={event.key()}, modifiers={event.modifiers()}")
-            
-            # DELキーの特別デバッグ (16777223 = Qt.Key_Delete)
-            if event.key() == 16777223:
-                print(f"[DEBUG] Delete key detected in eventFilter!")
-                print(f"[DEBUG] Selected shape: {self.canvas.selected_shape}")
-                print(f"[DEBUG] Delete action enabled: {self.actions.delete.isEnabled()}")
-                
-                # 直接delete_selected_shapeを呼び出す
+            # DELキー処理
+            if event.key() == Qt.Key_Delete:
                 if self.canvas.selected_shape and self.actions.delete.isEnabled():
-                    print("[DEBUG] Calling delete_selected_shape directly from eventFilter")
                     self.delete_selected_shape()
-                    return True  # Event handled
-                else:
-                    print("[DEBUG] Cannot delete: no shape selected or action disabled")
-                    return False
+                    return True
+                return False
             
-            # F1キー: Quick ID Selectorの表示/非表示 (Qt.Key_F1 = 16777264)
-            if event.key() == Qt.Key_F1 or event.key() == 16777264:
-                print(f"[DEBUG] F1 detected in eventFilter! Key code: {event.key()}")
+            # F1キー処理
+            if event.key() == Qt.Key_F1:
                 self.toggle_quick_id_selector()
-                return True  # Event handled
+                return True
             
-            # 数字キー（1-9）: Quick ID直接選択
-            if (Qt.Key_1 <= event.key() <= Qt.Key_9) or (49 <= event.key() <= 57):
-                if Qt.Key_1 <= event.key() <= Qt.Key_9:
-                    id_num = event.key() - Qt.Key_0
-                else:
-                    id_num = event.key() - 48  # ASCII codes
-                print(f"[DEBUG] Number key {id_num} detected in eventFilter!")
+            # 数字キー処理
+            if Qt.Key_1 <= event.key() <= Qt.Key_9:
+                id_num = event.key() - Qt.Key_0
                 self.select_quick_id(str(id_num))
-                return True  # Event handled
-            
-            # 0キー: ID 10を選択
-            elif event.key() == Qt.Key_0 or event.key() == 48:
-                print("[DEBUG] 0 key detected in eventFilter!")
+                return True
+            elif event.key() == Qt.Key_0:
                 self.select_quick_id("10")
-                return True  # Event handled
+                return True
             
-            # Check for Ctrl+Z
-            if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Z:
-                print("[DEBUG] Ctrl+Z detected in eventFilter!")
-                self.undo_action()
-                return True  # Event handled
-            
-            # Check for Ctrl+Y
-            if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Y:
-                print("[DEBUG] Ctrl+Y detected in eventFilter!")
-                self.redo_action()
-                return True  # Event handled
+            # Ctrl+Z/Y処理
+            if event.modifiers() == Qt.ControlModifier:
+                if event.key() == Qt.Key_Z:
+                    self.undo_action()
+                    return True
+                elif event.key() == Qt.Key_Y:
+                    self.redo_action()
+                    return True
         
-        # ホイールイベントをeventFilterでもキャッチ
+        # ホイールイベント処理
         elif event.type() == event.Wheel:
-            print(f"[DEBUG] eventFilter caught Wheel: modifiers={event.modifiers()}, delta={event.angleDelta().y()}")
-            
-            # Shift+ホイール: Quick ID切り替え
             if event.modifiers() == Qt.ShiftModifier:
-                print("[DEBUG] Shift+wheel detected in eventFilter!")
                 delta = event.angleDelta().y()
                 if delta > 0:
-                    print("[DEBUG] Wheel up - calling prev_quick_id")
                     self.prev_quick_id()
                 elif delta < 0:
-                    print("[DEBUG] Wheel down - calling next_quick_id")
                     self.next_quick_id()
-                return True  # Event handled
+                return True
         
-        # Pass event to parent
         return super(MainWindow, self).eventFilter(obj, event)
 
     # Support Functions #
@@ -1093,9 +1047,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
     # React to canvas signals.
     def shape_selection_changed(self, selected=False):
-        print(f"[DEBUG] shape_selection_changed called: selected={selected}")
-        print(f"[DEBUG] Canvas selected shape: {self.canvas.selected_shape}")
-        
         if self._no_selection_slot:
             self._no_selection_slot = False
         else:
@@ -1105,10 +1056,8 @@ class MainWindow(QMainWindow, WindowMixin):
             else:
                 self.label_list.clearSelection()
         
-        # selectedの値が正しくない可能性があるので、実際のshapeの状態に基づいて設定
         has_selection = self.canvas.selected_shape is not None
         self.actions.delete.setEnabled(has_selection)
-        print(f"[DEBUG] Delete action enabled set to: {has_selection}")
         self.actions.copy.setEnabled(selected)
         self.actions.edit.setEnabled(selected)
         self.actions.shapeLineColor.setEnabled(selected)
@@ -1960,27 +1909,16 @@ class MainWindow(QMainWindow, WindowMixin):
             self.set_dirty()
 
     def delete_selected_shape(self):
-        print("[DEBUG] delete_selected_shape called")
-        print(f"[DEBUG] Canvas selected shape: {self.canvas.selected_shape}")
-        print(f"[DEBUG] Delete action enabled: {self.actions.delete.isEnabled()}")
-        
         if not self.canvas.selected_shape:
-            print("[DEBUG] No shape selected for deletion")
             return
             
-        # Save state before deletion
         self.save_undo_state("delete_shape")
-        
         deleted_shape = self.canvas.delete_selected()
-        print(f"[DEBUG] Deleted shape: {deleted_shape}")
-        
         self.remove_label(deleted_shape)
         self.set_dirty()
         if self.no_shapes():
             for action in self.actions.onShapesPresent:
                 action.setEnabled(False)
-        
-        print("[DEBUG] delete_selected_shape completed")
 
     def choose_shape_line_color(self):
         color = self.color_dialog.getColor(self.line_color, u'Choose Line Color',
@@ -2374,48 +2312,33 @@ class MainWindow(QMainWindow, WindowMixin):
         threshold = self.bb_dup_iou_threshold.value()
         self.bb_dup_overwrite_checkbox.setText(f"重複時に上書き (IOU>{threshold:.1f})")
     
-    # Quick ID Selector関連メソッド
     def toggle_quick_id_selector(self):
         """Quick ID Selectorの表示/非表示を切り替え"""
         if self.quick_id_selector.isVisible():
             self.quick_id_selector.hide()
-            print("[QuickID] ID Selector hidden")
         else:
             self.quick_id_selector.show()
-            print("[QuickID] ID Selector shown")
     
     def select_quick_id(self, id_str):
         """Quick IDを選択"""
         if id_str != self.current_quick_id:
             self.current_quick_id = id_str
-            
-            # フローティングウィンドウの選択状態を更新
             self.quick_id_selector.set_current_id(id_str)
-            
-            # ステータスバーの表示を更新
             self.update_current_id_display()
-            
-            print(f"[QuickID] Selected ID: {id_str}")
-            
-            # 選択中のBBにIDを適用（必要に応じて）
             self.apply_quick_id_to_selected_shape()
     
     def next_quick_id(self):
         """次のIDに切り替え"""
         current_num = int(self.current_quick_id)
-        # 実際に利用可能なIDの数を使用
         max_ids = len(self.label_hist)
         next_num = current_num + 1 if current_num < max_ids else 1
-        print(f"[QuickID] next_quick_id: {current_num} -> {next_num} (max: {max_ids})")
         self.select_quick_id(str(next_num))
     
     def prev_quick_id(self):
         """前のIDに切り替え"""
         current_num = int(self.current_quick_id)
-        # 実際に利用可能なIDの数を使用
         max_ids = len(self.label_hist)
         prev_num = current_num - 1 if current_num > 1 else max_ids
-        print(f"[QuickID] prev_quick_id: {current_num} -> {prev_num} (max: {max_ids})")
         self.select_quick_id(str(prev_num))
     
     def on_quick_id_selected(self, id_str):
