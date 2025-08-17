@@ -2919,9 +2919,8 @@ class MainWindow(QMainWindow, WindowMixin):
                     print(f"[{prefix}] Already has label '{new_label}' at frame {frame_idx}, stopping")
                     break
                 
-                # フレームをロードして変更前の状態を保存
-                self.load_file(next_file, preserve_zoom=True)
-                before_state = self.get_current_state()
+                # 変更前の状態を保存（フレームをロードせずにshapes_dataから作成）
+                before_state = self._create_state_from_shapes_data(next_file, shapes_data)
                 
                 # ラベルを更新
                 print(f"[{prefix}] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current: {current_label})")
@@ -2929,9 +2928,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 
                 # アノテーションを保存
                 if self._save_propagated_annotation_with_size(annotation_paths, shapes_data, next_file, image_size):
-                    # フレームをリロードして変更後の状態を保存
-                    self.load_file(next_file, preserve_zoom=True)
-                    after_state = self.get_current_state()
+                    # 変更後の状態を保存（フレームをロードせずにshapes_dataから作成）
+                    after_state = self._create_state_from_shapes_data(next_file, shapes_data)
                     
                     # マルチフレーム操作に変更を追加
                     multi_frame_op.add_frame_change(next_file, before_state, after_state)
@@ -3448,6 +3446,24 @@ class MainWindow(QMainWindow, WindowMixin):
             points=[(p.x(), p.y()) for p in shape.points],
             difficult=shape.difficult
         )
+    
+    def _create_state_from_shapes_data(self, file_path, shapes_data):
+        """shapes_dataから状態オブジェクトを作成（フレームをロードせずに）"""
+        shapes = []
+        for shape_data in shapes_data:
+            label, points, line_color, fill_color, difficult = shape_data
+            shapes.append({
+                'label': label,
+                'points': points,
+                'line_color': line_color or generate_color_by_text(label).getRgb(),
+                'fill_color': fill_color or generate_color_by_text(label).getRgb(),
+                'difficult': difficult
+            })
+        
+        return {
+            'file_path': file_path,
+            'shapes': shapes
+        }
     
     def _restore_state(self, state):
         """Restore application state."""
