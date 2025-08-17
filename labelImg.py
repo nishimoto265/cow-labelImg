@@ -281,6 +281,25 @@ class MainWindow(QMainWindow, WindowMixin):
         # Connect to itemChanged to detect checkbox changes.
         self.label_list.itemChanged.connect(self.label_item_changed)
         list_layout.addWidget(self.label_list)
+        
+        # 描画選択パネルを追加
+        draw_options_group = QGroupBox("描画オプション")
+        draw_options_layout = QVBoxLayout()
+        
+        # BBの描画チェックボックス
+        self.draw_bounding_box_checkbox = QCheckBox("Bounding Box")
+        self.draw_bounding_box_checkbox.setChecked(True)  # デフォルトでチェック
+        self.draw_bounding_box_checkbox.stateChanged.connect(self.toggle_bounding_box_display)
+        draw_options_layout.addWidget(self.draw_bounding_box_checkbox)
+        
+        # IDの描画チェックボックス
+        self.draw_id_checkbox = QCheckBox("ID")
+        self.draw_id_checkbox.setChecked(True)  # デフォルトでチェック
+        self.draw_id_checkbox.stateChanged.connect(self.toggle_id_display)
+        draw_options_layout.addWidget(self.draw_id_checkbox)
+        
+        draw_options_group.setLayout(draw_options_layout)
+        list_layout.addWidget(draw_options_group)
 
 
 
@@ -1065,6 +1084,15 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def add_label(self, shape):
         shape.paint_label = self.display_label_option.isChecked()
+        shape.paint_id = self.draw_id_checkbox.isChecked()
+        
+        # 新しいBBにはcurrent_quick_idをtrack_idとして設定
+        if hasattr(self, 'current_quick_id') and self.current_quick_id:
+            shape.track_id = int(self.current_quick_id)
+        else:
+            shape.track_id = 1  # デフォルトID
+        
+        print(f"[DEBUG] Added shape with track_id: {shape.track_id}, paint_id: {shape.paint_id}")
         item = HashableQListWidgetItem(shape.label)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked)
@@ -2014,6 +2042,21 @@ class MainWindow(QMainWindow, WindowMixin):
     def toggle_paint_labels_option(self):
         for shape in self.canvas.shapes:
             shape.paint_label = self.display_label_option.isChecked()
+        self.canvas.repaint()
+    
+    def toggle_bounding_box_display(self, state):
+        """Bounding Boxの表示/非表示を切り替え"""
+        show_bb = state == Qt.Checked
+        # 各shapeの表示状態を制御（canvasで実装する必要がある）
+        self.canvas.show_bounding_boxes = show_bb
+        self.canvas.repaint()
+    
+    def toggle_id_display(self, state):
+        """IDの表示/非表示を切り替え"""
+        show_id = state == Qt.Checked
+        for shape in self.canvas.shapes:
+            shape.paint_id = show_id
+        self.canvas.repaint()
 
     # ==================== Undo/Redo Methods ====================
     
@@ -2030,6 +2073,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 'points': [(p.x(), p.y()) for p in shape.points],
                 'difficult': getattr(shape, 'difficult', False),
                 'paint_label': getattr(shape, 'paint_label', False),
+                'paint_id': getattr(shape, 'paint_id', True),
                 'line_color': shape.line_color.getRgb() if hasattr(shape, 'line_color') and shape.line_color else None,
                 'fill_color': shape.fill_color.getRgb() if hasattr(shape, 'fill_color') and shape.fill_color else None,
             }
@@ -2068,6 +2112,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 shape.close()
                 shape.difficult = shape_data.get('difficult', False)
                 shape.paint_label = shape_data.get('paint_label', self.display_label_option.isChecked())
+                shape.paint_id = shape_data.get('paint_id', self.draw_id_checkbox.isChecked())
                 
                 # Track IDを復元
                 if 'track_id' in shape_data:
@@ -2389,11 +2434,14 @@ class MainWindow(QMainWindow, WindowMixin):
             old_label = shape.label
             shape.label = new_label
             
+            # Track IDを設定
+            shape.track_id = int(self.current_quick_id)
+            
             # UIを更新
             self.set_dirty()
             self.update_combo_box()
             
-            print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}")
+            print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}, Track ID: {shape.track_id}")
             
             # Undo用の状態保存
             self.save_undo_state('quick_id_change')

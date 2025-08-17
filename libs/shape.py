@@ -45,6 +45,7 @@ class Shape(object):
         self.selected = False
         self.difficult = difficult
         self.paint_label = paint_label
+        self.paint_id = True  # デフォルトでIDを描画
         self.track_id = None
         self.is_tracked = False
 
@@ -114,7 +115,7 @@ class Shape(object):
             painter.fillPath(vertex_path, self.vertex_fill_color)
 
             # Draw text at the top-left
-            if self.paint_label:
+            if self.paint_label or self.paint_id:
                 min_x = sys.maxsize
                 min_y = sys.maxsize
                 min_y_label = int(1.25 * self.label_font_size)
@@ -126,15 +127,51 @@ class Shape(object):
                     font.setPointSize(self.label_font_size)
                     font.setBold(True)
                     painter.setFont(font)
-                    if self.label is None:
-                        self.label = ""
-                    if min_y < min_y_label:
-                        min_y += min_y_label
-                    painter.drawText(int(min_x), int(min_y), self.label)
+                    
+                    # テキストを作成
+                    text_parts = []
+                    if self.paint_label and self.label:
+                        text_parts.append(str(self.label))
+                    if self.paint_id and self.track_id is not None:
+                        text_parts.append(f"ID:{self.track_id}")
+                    
+                    text = " ".join(text_parts)
+                    if text:
+                        if min_y < min_y_label:
+                            min_y += min_y_label
+                        painter.drawText(int(min_x), int(min_y), text)
 
             if self.fill:
                 color = self.select_fill_color if self.selected else self.fill_color
                 painter.fillPath(line_path, color)
+    
+    def paint_text_only(self, painter):
+        """テキスト（ラベル・ID）のみを描画"""
+        if self.points and (self.paint_label or self.paint_id):
+            min_x = sys.maxsize
+            min_y = sys.maxsize
+            min_y_label = int(1.25 * self.label_font_size)
+            for point in self.points:
+                min_x = min(min_x, point.x())
+                min_y = min(min_y, point.y())
+            if min_x != sys.maxsize and min_y != sys.maxsize:
+                font = QFont()
+                font.setPointSize(self.label_font_size)
+                font.setBold(True)
+                painter.setFont(font)
+                
+                # テキストを作成
+                text_parts = []
+                if self.paint_label and self.label:
+                    text_parts.append(str(self.label))
+                if self.paint_id and self.track_id is not None:
+                    text_parts.append(f"ID:{self.track_id}")
+                
+                text = " ".join(text_parts)
+                if text:
+                    if min_y < min_y_label:
+                        min_y += min_y_label
+                    painter.drawText(int(min_x), int(min_y), text)
 
     def draw_vertex(self, path, i):
         d = self.point_size / self.scale
