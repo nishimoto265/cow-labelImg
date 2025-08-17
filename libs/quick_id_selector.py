@@ -344,15 +344,9 @@ class QuickIDSelector(QDialog):
         missing_labels = all_labels - existing_labels
         
         if missing_labels:
-            # 不足ラベルをソートして表示
+            # 不足ラベルをソートして表示（ラベル名のみ）
             sorted_missing = sorted(missing_labels, key=lambda x: self.class_names.index(x))
-            # インデックス番号も表示
-            missing_with_index = []
-            for label in sorted_missing:
-                index = self.class_names.index(label) + 1
-                missing_with_index.append(f"{index}:{label}")
-            
-            display_text = ", ".join(missing_with_index)
+            display_text = ", ".join(sorted_missing)
             self.missing_labels_text.setText(display_text)
             self.missing_labels_text.setStyleSheet("""
                 QLabel {
