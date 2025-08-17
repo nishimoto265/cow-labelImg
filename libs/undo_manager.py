@@ -124,6 +124,13 @@ class UndoManager:
         Returns:
             現在の状態データ、またはNone
         """
+        # マルチフレーム操作のundo/redo後の一時的な状態があればそれを返す
+        if hasattr(self, '_multi_frame_state'):
+            state = self._multi_frame_state
+            # 一度返したら削除して次回は通常の履歴を使う
+            delattr(self, '_multi_frame_state')
+            return state
+        
         if 0 <= self.current_index < len(self.history):
             return copy.deepcopy(self.history[self.current_index])
         return None
@@ -354,16 +361,7 @@ class FrameUndoManager:
         
         # 各フレームを前の状態に戻す
         for change in operation.frame_changes:
-            frame_path = change['frame_path']
-            before_state = change['before']
-            
-            # フレームのマネージャーを取得
-            manager = self.get_manager(frame_path)
-            # 直接履歴を操作して前の状態を設定
-            manager.history.append(copy.deepcopy(before_state))
-            manager.current_index = len(manager.history) - 1
-            
-            print(f"[MultiFrame] Restored {frame_path} to before state")
+            self._restore_frame_state(change['frame_path'], change['before'])
         
         return operation
     
@@ -381,18 +379,26 @@ class FrameUndoManager:
         
         # 各フレームを後の状態に戻す
         for change in operation.frame_changes:
-            frame_path = change['frame_path']
-            after_state = change['after']
-            
-            # フレームのマネージャーを取得
-            manager = self.get_manager(frame_path)
-            # 直接履歴を操作して後の状態を設定
-            manager.history.append(copy.deepcopy(after_state))
-            manager.current_index = len(manager.history) - 1
-            
-            print(f"[MultiFrame] Restored {frame_path} to after state")
+            self._restore_frame_state(change['frame_path'], change['after'])
         
         return operation
+    
+    def _restore_frame_state(self, frame_path, state):
+        """
+        フレームの状態を復元する共通処理
+        
+        Args:
+            frame_path: フレームのファイルパス
+            state: 復元する状態
+        """
+        # フレームのマネージャーを取得または作成
+        manager = self.get_manager(frame_path)
+        
+        # マルチフレーム操作では、一時的な状態として設定
+        # get_current_state()が呼ばれた時に使用され、その後削除される
+        manager._multi_frame_state = copy.deepcopy(state)
+        
+        print(f"[MultiFrame] Restored {frame_path} state")
     
     def _add_to_unified_history(self, operation_info):
         """

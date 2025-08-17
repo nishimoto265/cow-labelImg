@@ -46,8 +46,6 @@ class Shape(object):
         self.difficult = difficult
         self.paint_label = paint_label
         self.paint_id = True  # デフォルトでIDを描画
-        self.track_id = None
-        self.is_tracked = False
 
         self._highlight_index = None
         self._highlight_mode = self.NEAR_VERTEX
@@ -132,8 +130,9 @@ class Shape(object):
                     text_parts = []
                     if self.paint_label and self.label:
                         text_parts.append(str(self.label))
-                    if self.paint_id and self.track_id is not None:
-                        text_parts.append(f"ID:{self.track_id}")
+                    if self.paint_id and self.label:
+                        # ラベルをそのまま表示
+                        text_parts.append(str(self.label))
                     
                     text = " ".join(text_parts)
                     if text:
@@ -164,8 +163,9 @@ class Shape(object):
                 text_parts = []
                 if self.paint_label and self.label:
                     text_parts.append(str(self.label))
-                if self.paint_id and self.track_id is not None:
-                    text_parts.append(f"ID:{self.track_id}")
+                if self.paint_id and self.label:
+                    # ラベルをそのまま表示
+                    text_parts.append(str(self.label))
                 
                 text = " ".join(text_parts)
                 if text:
@@ -236,8 +236,7 @@ class Shape(object):
         if self.fill_color != Shape.fill_color:
             shape.fill_color = self.fill_color
         shape.difficult = self.difficult
-        shape.track_id = getattr(self, 'track_id', None)
-        shape.is_tracked = getattr(self, 'is_tracked', False)
+        shape.paint_id = getattr(self, 'paint_id', True)
         return shape
 
     def __len__(self):

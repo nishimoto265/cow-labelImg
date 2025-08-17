@@ -149,6 +149,8 @@ class MainWindow(QMainWindow, WindowMixin):
         self.quick_id_selector.id_selected.connect(self.on_quick_id_selected)
         self.current_quick_id = "1"  # デフォルトID
         
+        # BB ID管理
+        
         # Install event filter to catch keyboard shortcuts globally
         self.installEventFilter(self)
         print("[DEBUG] Event filter installed for global keyboard shortcuts")
@@ -1086,13 +1088,7 @@ class MainWindow(QMainWindow, WindowMixin):
         shape.paint_label = self.display_label_option.isChecked()
         shape.paint_id = self.draw_id_checkbox.isChecked()
         
-        # 新しいBBにはcurrent_quick_idをtrack_idとして設定
-        if hasattr(self, 'current_quick_id') and self.current_quick_id:
-            shape.track_id = int(self.current_quick_id)
-        else:
-            shape.track_id = 1  # デフォルトID
-        
-        print(f"[DEBUG] Added shape with track_id: {shape.track_id}, paint_id: {shape.paint_id}")
+        print(f"[DEBUG] Added shape with label: {shape.label}, paint_id: {shape.paint_id}")
         item = HashableQListWidgetItem(shape.label)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked)
@@ -1169,9 +1165,6 @@ class MainWindow(QMainWindow, WindowMixin):
                         points=[(p.x(), p.y()) for p in s.points],
                         # add chris
                         difficult=s.difficult)
-            # Add track_id if it exists
-            if hasattr(s, 'track_id') and s.track_id is not None:
-                result['track_id'] = s.track_id
             return result
 
         shapes = [format_shape(shape) for shape in self.canvas.shapes]
@@ -1397,7 +1390,6 @@ class MainWindow(QMainWindow, WindowMixin):
         # Save tracking info before reset
         temp_prev_shapes = self.prev_frame_shapes if hasattr(self, 'prev_frame_shapes') and not clear_prev_shapes else []
         temp_tracking_mode = self.continuous_tracking_mode if hasattr(self, 'continuous_tracking_mode') else False
-        temp_next_track_id = self.tracker.next_track_id if hasattr(self, 'tracker') else 1
         
         # Save zoom state before reset if requested
         if preserve_zoom and hasattr(self, 'zoom_widget'):
@@ -1415,8 +1407,6 @@ class MainWindow(QMainWindow, WindowMixin):
         # Restore tracking info after reset
         self.prev_frame_shapes = temp_prev_shapes
         self.continuous_tracking_mode = temp_tracking_mode
-        if hasattr(self, 'tracker'):
-            self.tracker.next_track_id = temp_next_track_id
         
         self.canvas.setEnabled(False)
         if file_path is None:
@@ -1530,6 +1520,28 @@ class MainWindow(QMainWindow, WindowMixin):
         return '[{} / {}]'.format(self.cur_img_idx + 1, self.img_count)
 
     def show_bounding_box_from_annotation_file(self, file_path):
+        # Check if we should use undo manager state instead of disk
+        if hasattr(self, 'undo_manager') and self.file_path:
+            manager = self.undo_manager.get_manager(self.file_path)
+            
+            # Check for multi-frame temporary state first
+            if hasattr(manager, '_multi_frame_state'):
+                print(f"[DEBUG] Using multi-frame undo state for {self.file_path}")
+                current_state = manager.get_current_state()
+                if current_state:
+                    self.restore_state(current_state)
+                    return
+            
+            # Check if we're in the middle of undo history
+            if manager.history and manager.current_index >= 0:
+                if manager.current_index < len(manager.history) - 1:
+                    # We've done an undo, use the undo manager's state
+                    current_state = manager.get_current_state()
+                    if current_state:
+                        print(f"[DEBUG] Using undo manager state instead of disk for {self.file_path}")
+                        self.restore_state(current_state)
+                        return
+        
         if self.default_save_dir is not None:
             basename = os.path.basename(os.path.splitext(file_path)[0])
             xml_path = os.path.join(self.default_save_dir, basename + XML_EXT)
@@ -2078,8 +2090,6 @@ class MainWindow(QMainWindow, WindowMixin):
                 'fill_color': shape.fill_color.getRgb() if hasattr(shape, 'fill_color') and shape.fill_color else None,
             }
             # Track IDがあれば保存
-            if hasattr(shape, 'track_id'):
-                shape_data['track_id'] = shape.track_id
             if hasattr(shape, 'is_tracked'):
                 shape_data['is_tracked'] = shape.is_tracked
             state['shapes'].append(shape_data)
@@ -2107,7 +2117,7 @@ class MainWindow(QMainWindow, WindowMixin):
             # shapesを復元
             for shape_data in state.get('shapes', []):
                 shape = Shape()
-                shape.label = shape_data.get('label', '') or ''
+                shape.label = str(shape_data.get('label', ''))
                 shape.points = [QPointF(x, y) for x, y in shape_data['points']]
                 shape.close()
                 shape.difficult = shape_data.get('difficult', False)
@@ -2115,8 +2125,6 @@ class MainWindow(QMainWindow, WindowMixin):
                 shape.paint_id = shape_data.get('paint_id', self.draw_id_checkbox.isChecked())
                 
                 # Track IDを復元
-                if 'track_id' in shape_data:
-                    shape.track_id = shape_data['track_id']
                 if 'is_tracked' in shape_data:
                     shape.is_tracked = shape_data['is_tracked']
                 
@@ -2178,12 +2186,6 @@ class MainWindow(QMainWindow, WindowMixin):
             print("[DEBUG] No file_path, returning")
             return
         
-        # Check for multi-frame operations first
-        if self.undo_manager.can_undo_multi_frame():
-            print("[DEBUG] Multi-frame undo available, using it")
-            self.undo_multi_frame_operation()
-            return
-        
         print(f"[DEBUG] Setting current frame for undo: {self.file_path}")
         self.undo_manager.set_current_frame(self.file_path)
         
@@ -2193,19 +2195,21 @@ class MainWindow(QMainWindow, WindowMixin):
             self.statusBar().showMessage('Nothing to undo', 2000)
             return
         
-        # 現在の状態を保存（初回のundo時のみ）
-        current_state = self.get_current_state()
-        manager = self.undo_manager.get_manager(self.file_path)
-        
-        # 現在の状態が履歴の最後と異なる場合は保存
-        last_state = manager.get_current_state()
-        if last_state and len(current_state['shapes']) != len(last_state['shapes']):
-            self.save_undo_state("before_undo")
         
         # Undo実行
-        state = self.undo_manager.undo()
-        if state:
-            self.restore_state(state)
+        result = self.undo_manager.undo()
+        if result:
+            # single_frame操作の場合はresult is dict, multi_frame操作の場合はresult is MultiFrameOperation
+            if isinstance(result, dict):
+                # 単一フレーム操作の場合は通常の復元
+                self.restore_state(result)
+            else:
+                # multi_frame操作の場合、現在のフレームが影響を受けているかチェックして必要ならリロード
+                if hasattr(result, 'frame_changes'):
+                    current_frame_affected = any(change['frame_path'] == self.file_path for change in result.frame_changes)
+                    if current_frame_affected:
+                        print(f"[MultiFrame] Current frame {self.file_path} was affected, reloading")
+                        self.load_file(self.file_path)
             self.statusBar().showMessage('Undo successful', 2000)
         
         # ボタンの有効/無効を更新
@@ -2219,12 +2223,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if not self.file_path:
             return
         
-        # Check for multi-frame operations first
-        if self.undo_manager.can_redo_multi_frame():
-            print("[DEBUG] Multi-frame redo available, using it")
-            self.redo_multi_frame_operation()
-            return
-        
         self.undo_manager.set_current_frame(self.file_path)
         
         if not self.undo_manager.can_redo():
@@ -2232,9 +2230,19 @@ class MainWindow(QMainWindow, WindowMixin):
             return
         
         # Redo実行
-        state = self.undo_manager.redo()
-        if state:
-            self.restore_state(state)
+        result = self.undo_manager.redo()
+        if result:
+            # single_frame操作の場合はresult is dict, multi_frame操作の場合はresult is MultiFrameOperation
+            if isinstance(result, dict):
+                # 単一フレーム操作の場合は通常の復元
+                self.restore_state(result)
+            else:
+                # multi_frame操作の場合、現在のフレームが影響を受けているかチェックして必要ならリロード
+                if hasattr(result, 'frame_changes'):
+                    current_frame_affected = any(change['frame_path'] == self.file_path for change in result.frame_changes)
+                    if current_frame_affected:
+                        print(f"[MultiFrame] Current frame {self.file_path} was affected, reloading")
+                        self.load_file(self.file_path)
             self.statusBar().showMessage('Redo successful', 2000)
         
         # ボタンの有効/無効を更新
@@ -2339,9 +2347,6 @@ class MainWindow(QMainWindow, WindowMixin):
             # If turning on tracking mode, assign IDs to current shapes
             if self.canvas.shapes:
                 for shape in self.canvas.shapes:
-                    if not hasattr(shape, 'track_id') or shape.track_id is None:
-                        shape.track_id = self.tracker.next_track_id
-                        self.tracker.next_track_id += 1
                     if not hasattr(shape, 'is_tracked'):
                         shape.is_tracked = False
         else:
@@ -2435,13 +2440,12 @@ class MainWindow(QMainWindow, WindowMixin):
             shape.label = new_label
             
             # Track IDを設定
-            shape.track_id = int(self.current_quick_id)
             
             # UIを更新
             self.set_dirty()
             self.update_combo_box()
             
-            print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}, Track ID: {shape.track_id}")
+            print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}")
             
             # Undo用の状態保存
             self.save_undo_state('quick_id_change')
@@ -3240,14 +3244,14 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Debug: Print before tracking
         print(f"[Tracking] Applying tracking to frame {self.cur_img_idx}")
-        print(f"[Tracking] Prev shapes: {[(s.label, getattr(s, 'track_id', None)) for s in self.prev_frame_shapes]}")
-        print(f"[Tracking] Curr shapes before: {[(s.label, getattr(s, 'track_id', None)) for s in curr_shapes]}")
+        print(f"[Tracking] Prev shapes: {[s.label for s in self.prev_frame_shapes]}")
+        print(f"[Tracking] Curr shapes before: {[s.label for s in curr_shapes]}")
         
         # Apply tracking
         self.tracker.track_shapes(self.prev_frame_shapes, curr_shapes)
         
         # Debug: Print after tracking
-        print(f"[Tracking] Curr shapes after: {[(s.label, getattr(s, 'track_id', None), getattr(s, 'is_tracked', False)) for s in curr_shapes]}")
+        print(f"[Tracking] Curr shapes after: {[s.label for s in curr_shapes]}")
         
         # Update colors for tracked shapes
         for shape in curr_shapes:
