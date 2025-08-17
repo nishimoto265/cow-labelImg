@@ -27,9 +27,9 @@ class QuickIDSelector(QDialog):
     BUTTON_MIN_WIDTH = 70
     BUTTON_MIN_HEIGHT = 35
     WINDOW_WIDTH = 400
-    WINDOW_HEIGHT = 300
+    WINDOW_HEIGHT = 350
     WINDOW_MIN_WIDTH = 320
-    WINDOW_MIN_HEIGHT = 250
+    WINDOW_MIN_HEIGHT = 300
     
     # Styles
     SELECTED_BUTTON_STYLE = """
@@ -135,18 +135,17 @@ class QuickIDSelector(QDialog):
         self._update_button_states()
     
     def _create_missing_labels_widget(self):
-        """不足ラベル表示ウィジェットを作成"""
+        """不足ラベル・重複ラベル表示ウィジェットを作成"""
         widget = QWidget()
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         
-        # タイトルラベル
-        title_label = QLabel("不足ラベル:")
-        title_label.setStyleSheet("font-weight: bold; color: #666;")
-        layout.addWidget(title_label)
+        # 不足ラベル
+        missing_title = QLabel("不足ラベル:")
+        missing_title.setStyleSheet("font-weight: bold; color: #666;")
+        layout.addWidget(missing_title)
         
-        # 不足ラベル表示用のラベル
         self.missing_labels_text = QLabel("なし")
         self.missing_labels_text.setWordWrap(True)
         self.missing_labels_text.setStyleSheet("""
@@ -156,10 +155,29 @@ class QuickIDSelector(QDialog):
                 border-radius: 4px;
                 padding: 4px;
                 color: #333;
-                min-height: 30px;
+                min-height: 25px;
             }
         """)
         layout.addWidget(self.missing_labels_text)
+        
+        # 重複ラベル
+        duplicate_title = QLabel("重複ラベル:")
+        duplicate_title.setStyleSheet("font-weight: bold; color: #666;")
+        layout.addWidget(duplicate_title)
+        
+        self.duplicate_labels_text = QLabel("なし")
+        self.duplicate_labels_text.setWordWrap(True)
+        self.duplicate_labels_text.setStyleSheet("""
+            QLabel {
+                background-color: rgba(200, 200, 255, 180);
+                border: 1px solid #aac;
+                border-radius: 4px;
+                padding: 4px;
+                color: #333;
+                min-height: 25px;
+            }
+        """)
+        layout.addWidget(self.duplicate_labels_text)
         
         widget.setLayout(layout)
         return widget
@@ -325,13 +343,14 @@ class QuickIDSelector(QDialog):
     
     def update_missing_labels(self, current_frame_labels=None):
         """
-        不足ラベルを更新
+        不足ラベルと重複ラベルを更新
         
         Args:
             current_frame_labels: 現在のフレームに存在するラベルのリスト
         """
         if not self.class_names:
             self.missing_labels_text.setText("クラス定義なし")
+            self.duplicate_labels_text.setText("なし")
             return
         
         if current_frame_labels is None:
@@ -343,6 +362,7 @@ class QuickIDSelector(QDialog):
         all_labels = set(self.class_names)
         missing_labels = all_labels - existing_labels
         
+        # 不足ラベルの表示
         if missing_labels:
             # 不足ラベルをソートして表示（ラベル名のみ）
             sorted_missing = sorted(missing_labels, key=lambda x: self.class_names.index(x))
@@ -355,7 +375,7 @@ class QuickIDSelector(QDialog):
                     border-radius: 4px;
                     padding: 4px;
                     color: #800;
-                    min-height: 30px;
+                    min-height: 25px;
                 }
             """)
         else:
@@ -367,7 +387,44 @@ class QuickIDSelector(QDialog):
                     border-radius: 4px;
                     padding: 4px;
                     color: #080;
-                    min-height: 30px;
+                    min-height: 25px;
+                }
+            """)
+        
+        # 重複しているラベルを検出
+        from collections import Counter
+        label_counts = Counter(current_frame_labels) if current_frame_labels else Counter()
+        duplicate_labels = {label: count for label, count in label_counts.items() if count > 1}
+        
+        # 重複ラベルの表示
+        if duplicate_labels:
+            # 重複ラベルを表示（ラベル名と個数）
+            duplicate_items = []
+            for label, count in sorted(duplicate_labels.items()):
+                duplicate_items.append(f"{label}({count})")
+            display_text = ", ".join(duplicate_items)
+            self.duplicate_labels_text.setText(display_text)
+            self.duplicate_labels_text.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(255, 200, 200, 180);
+                    border: 1px solid #f66;
+                    border-radius: 4px;
+                    padding: 4px;
+                    color: #800;
+                    min-height: 25px;
+                    font-weight: bold;
+                }
+            """)
+        else:
+            self.duplicate_labels_text.setText("なし")
+            self.duplicate_labels_text.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(200, 200, 255, 180);
+                    border: 1px solid #aac;
+                    border-radius: 4px;
+                    padding: 4px;
+                    color: #333;
+                    min-height: 25px;
                 }
             """)
     
