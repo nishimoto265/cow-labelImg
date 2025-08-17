@@ -414,7 +414,7 @@ class MainWindow(QMainWindow, WindowMixin):
         create = action(get_str('crtBox'), self.create_shape,
                         'w', 'new', get_str('crtBoxDetail'), enabled=False)
         delete = action(get_str('delBox'), self.delete_selected_shape,
-                        'Delete', 'delete', get_str('delBoxDetail'), enabled=False)
+                        'Delete;s', 'delete', get_str('delBoxDetail'), enabled=False)
         copy = action(get_str('dupBox'), self.copy_selected_shape,
                       'Ctrl+D', 'copy', get_str('dupBoxDetail'),
                       enabled=False)
@@ -749,8 +749,8 @@ class MainWindow(QMainWindow, WindowMixin):
     def eventFilter(self, obj, event):
         """Global event filter to catch keyboard shortcuts"""
         if event.type() == event.KeyPress:
-            # DELキー処理
-            if event.key() == Qt.Key_Delete:
+            # DELキー・sキー処理
+            if event.key() == Qt.Key_Delete or event.key() == Qt.Key_S:
                 if self.canvas.selected_shape and self.actions.delete.isEnabled():
                     self.delete_selected_shape()
                     return True
