@@ -2502,7 +2502,7 @@ class MainWindow(QMainWindow, WindowMixin):
         print(f"[QuickID] Applied to current frame: {old_label} -> {new_label}")
         
         # 後続フレームに伝播
-        frames_processed = self._propagate_quick_id_to_subsequent_frames(shape, multi_frame_op, new_label)
+        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, multi_frame_op, new_label, "QuickID")
         
         # マルチフレーム操作を保存
         if multi_frame_op.frame_changes:
@@ -2518,105 +2518,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.statusBar().showMessage(f'連続ID付けが完了しました。{frames_processed + 1}フレームに適用しました。', 3000)
         else:
             self.statusBar().showMessage(f'IDを変更しました: {old_label} -> {new_label}', 3000)
-    
-    def _propagate_quick_id_to_subsequent_frames(self, source_shape, multi_frame_op, new_label):
-        """後続フレームにQuick IDを伝播させる（マルチフレーム操作用）"""
-        # 現在の状態を保存
-        current_state = {
-            'frame_idx': self.cur_img_idx,
-            'dirty': self.dirty,
-            'file_path': self.file_path
-        }
-        
-        prev_shape = source_shape.copy()
-        frame_idx = current_state['frame_idx'] + 1
-        frames_processed = 0
-        
-        # 画像サイズを取得
-        image_size = None
-        if hasattr(self, 'image') and self.image and not self.image.isNull():
-            image_size = self.image.size()
-        
-        # プログレスダイアログを作成
-        progress = QProgressDialog("連続ID付け処理中...", "キャンセル", 0, 
-                                  self.img_count - frame_idx, self)
-        progress.setWindowTitle("処理中")
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.show()
-        
-        while frame_idx < self.img_count:
-            # キャンセルチェック
-            if progress.wasCanceled():
-                print(f"[QuickID] Cancelled by user at frame {frame_idx}")
-                break
-            
-            # プログレス更新
-            progress.setValue(frame_idx - current_state['frame_idx'])
-            progress.setLabelText(f"処理中: フレーム {frame_idx + 1}/{self.img_count}")
-            QApplication.processEvents()
-            
-            # 次のフレームのアノテーションを読み込む
-            next_file = self.m_img_list[frame_idx]
-            annotation_paths = self._get_annotation_paths(next_file)
-            shapes_data = self._load_annotation_shapes_with_size(annotation_paths, next_file, image_size)
-            
-            if not shapes_data:
-                print(f"[QuickID] No annotation found at frame {frame_idx}, stopping")
-                break
-            
-            # マッチする形状を探す
-            best_match_idx, best_iou = self._find_best_match(shapes_data, prev_shape)
-            
-            if best_match_idx >= 0:
-                # 現在のラベルをチェック
-                current_label = shapes_data[best_match_idx][0]
-                
-                # 既に同じラベルの場合は停止
-                if current_label == new_label:
-                    print(f"[QuickID] Already has label '{new_label}' at frame {frame_idx}, stopping")
-                    break
-                
-                # フレームをロードして変更前の状態を保存
-                self.load_file(next_file, preserve_zoom=True)
-                before_state = self.get_current_state()
-                
-                # ラベルを更新
-                print(f"[QuickID] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current: {current_label})")
-                shapes_data[best_match_idx] = self._update_shape_label(shapes_data[best_match_idx], new_label)
-                
-                # アノテーションを保存
-                if self._save_propagated_annotation_with_size(annotation_paths, shapes_data, next_file, image_size):
-                    # フレームをリロードして変更後の状態を保存
-                    self.load_file(next_file, preserve_zoom=True)
-                    after_state = self.get_current_state()
-                    
-                    # マルチフレーム操作に変更を追加
-                    multi_frame_op.add_frame_change(next_file, before_state, after_state)
-                    
-                    # 次の反復用にprev_shapeを更新
-                    points = shapes_data[best_match_idx][1]
-                    prev_shape = Shape(label=new_label)
-                    for x, y in points:
-                        prev_shape.add_point(QPointF(x, y))
-                    prev_shape.close()
-                    frames_processed += 1
-                else:
-                    print(f"[QuickID] Failed to save annotation at frame {frame_idx}")
-                    break
-            else:
-                print(f"[QuickID] No matching shape found at frame {frame_idx}, stopping")
-                break
-            
-            frame_idx += 1
-        
-        progress.close()
-        
-        # 状態を復元
-        self._restore_state(current_state)
-        
-        print(f"[QuickID] Propagated to {frames_processed} subsequent frames")
-        return frames_processed
     
     def get_class_name_for_quick_id(self, quick_id):
         """Quick IDに対応するクラス名を取得（classes.txtから直接）"""
@@ -2844,23 +2745,73 @@ class MainWindow(QMainWindow, WindowMixin):
         if not item:
             return
         
-        # Save state before changing label for undo
-        self.save_undo_state("click_change_label")
-        
         # Set flag to prevent recursion
         self._applying_label = True
         
-        # Check if using default label
+        # Store the old label
+        old_label = shape.label
+        
+        # Determine the new label
+        new_label = None
         if self.use_default_label_checkbox.isChecked() and self.default_label:
-            # Apply default label
-            shape.label = self.default_label
-            item.setText(self.default_label)
+            new_label = self.default_label
         else:
             # Show label dialog
             text = self.label_dialog.pop_up(item.text())
             if text is not None:
-                shape.label = text
-                item.setText(text)
+                new_label = text
+        
+        # If label didn't change or was cancelled, return
+        if new_label is None or new_label == old_label:
+            self._applying_label = False
+            return
+        
+        # If continuous tracking mode is ON, use multi-frame operation
+        if self.continuous_tracking_mode:
+            print(f"[ClickChange] Starting continuous label change: {old_label} -> {new_label}")
+            self.apply_label_with_propagation(shape, new_label, old_label, item)
+        else:
+            # Normal single-frame operation
+            # Save state before changing label for undo
+            self.save_undo_state("click_change_label")
+            
+            # Apply label
+            shape.label = new_label
+            item.setText(new_label)
+            
+            # Update shape color based on new label
+            shape.line_color = generate_color_by_text(shape.label)
+            item.setBackground(generate_color_by_text(shape.label))
+            
+            # Mark as dirty and update
+            self.set_dirty()
+            self.canvas.load_shapes(self.canvas.shapes)
+            self.update_combo_box()
+        
+        # Reset flag
+        self._applying_label = False
+    
+    def apply_label_with_propagation(self, shape, new_label, old_label, item):
+        """Apply label change with propagation as a multi-frame operation."""
+        if not self.continuous_tracking_mode or not shape:
+            return
+        
+        # 現在のフレーム情報を保存
+        current_file = self.file_path
+        current_idx = self.cur_img_idx
+        
+        # マルチフレーム操作を開始
+        multi_frame_op = self.undo_manager.start_multi_frame_operation(
+            'continuous_label_change',
+            f'Continuous label change: {old_label} -> {new_label}'
+        )
+        
+        # まず現在のフレームの変更を記録
+        before_state = self.get_current_state()
+        
+        # Apply label
+        shape.label = new_label
+        item.setText(new_label)
         
         # Update shape color based on new label
         shape.line_color = generate_color_by_text(shape.label)
@@ -2871,12 +2822,131 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.load_shapes(self.canvas.shapes)
         self.update_combo_box()
         
-        # If continuous tracking mode is ON, propagate label to subsequent frames
-        if self.continuous_tracking_mode:
-            self.propagate_label_to_subsequent_frames(shape)
+        # 現在のフレームを保存（必要なら）
+        if self.auto_saving.isChecked() and self.default_save_dir:
+            self.save_file()
         
-        # Reset flag
-        self._applying_label = False
+        after_state = self.get_current_state()
+        multi_frame_op.add_frame_change(current_file, before_state, after_state)
+        
+        print(f"[ClickChange] Applied to current frame: {old_label} -> {new_label}")
+        
+        # 後続フレームに伝播
+        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, multi_frame_op, new_label, "ClickChange")
+        
+        # マルチフレーム操作を保存
+        if multi_frame_op.frame_changes:
+            self.undo_manager.save_multi_frame_operation(multi_frame_op)
+            print(f"[ClickChange] Saved multi-frame operation for {len(multi_frame_op.frame_changes)} frames")
+        
+        # 元のフレームに戻る
+        if self.file_path != current_file:
+            self.load_file(current_file, preserve_zoom=True)
+        
+        # ステータスメッセージ
+        if frames_processed > 0:
+            self.statusBar().showMessage(f'連続ラベル変更が完了しました。{frames_processed + 1}フレームに適用しました。', 3000)
+        else:
+            self.statusBar().showMessage(f'ラベルを変更しました: {old_label} -> {new_label}', 3000)
+    
+    def _propagate_label_to_subsequent_frames_multi(self, source_shape, multi_frame_op, new_label, prefix="Propagate"):
+        """後続フレームにラベルを伝播させる（マルチフレーム操作用）"""
+        # 現在の状態を保存
+        current_state = {
+            'frame_idx': self.cur_img_idx,
+            'dirty': self.dirty,
+            'file_path': self.file_path
+        }
+        
+        prev_shape = source_shape.copy()
+        frame_idx = current_state['frame_idx'] + 1
+        frames_processed = 0
+        
+        # 画像サイズを取得
+        image_size = None
+        if hasattr(self, 'image') and self.image and not self.image.isNull():
+            image_size = self.image.size()
+        
+        # プログレスダイアログを作成
+        progress = QProgressDialog("連続ラベル変更処理中...", "キャンセル", 0,
+                                  self.img_count - frame_idx, self)
+        progress.setWindowTitle("処理中")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        
+        while frame_idx < self.img_count:
+            # キャンセルチェック
+            if progress.wasCanceled():
+                print(f"[{prefix}] Cancelled by user at frame {frame_idx}")
+                break
+            
+            # プログレス更新
+            progress.setValue(frame_idx - current_state['frame_idx'])
+            progress.setLabelText(f"処理中: フレーム {frame_idx + 1}/{self.img_count}")
+            QApplication.processEvents()
+            
+            # 次のフレームのアノテーションを読み込む
+            next_file = self.m_img_list[frame_idx]
+            annotation_paths = self._get_annotation_paths(next_file)
+            shapes_data = self._load_annotation_shapes_with_size(annotation_paths, next_file, image_size)
+            
+            if not shapes_data:
+                print(f"[{prefix}] No annotation found at frame {frame_idx}, stopping")
+                break
+            
+            # マッチする形状を探す
+            best_match_idx, best_iou = self._find_best_match(shapes_data, prev_shape)
+            
+            if best_match_idx >= 0:
+                # 現在のラベルをチェック
+                current_label = shapes_data[best_match_idx][0]
+                
+                # 既に同じラベルの場合は停止
+                if current_label == new_label:
+                    print(f"[{prefix}] Already has label '{new_label}' at frame {frame_idx}, stopping")
+                    break
+                
+                # フレームをロードして変更前の状態を保存
+                self.load_file(next_file, preserve_zoom=True)
+                before_state = self.get_current_state()
+                
+                # ラベルを更新
+                print(f"[{prefix}] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current: {current_label})")
+                shapes_data[best_match_idx] = self._update_shape_label(shapes_data[best_match_idx], new_label)
+                
+                # アノテーションを保存
+                if self._save_propagated_annotation_with_size(annotation_paths, shapes_data, next_file, image_size):
+                    # フレームをリロードして変更後の状態を保存
+                    self.load_file(next_file, preserve_zoom=True)
+                    after_state = self.get_current_state()
+                    
+                    # マルチフレーム操作に変更を追加
+                    multi_frame_op.add_frame_change(next_file, before_state, after_state)
+                    
+                    # 次の反復用にprev_shapeを更新
+                    points = shapes_data[best_match_idx][1]
+                    prev_shape = Shape(label=new_label)
+                    for x, y in points:
+                        prev_shape.add_point(QPointF(x, y))
+                    prev_shape.close()
+                    frames_processed += 1
+                else:
+                    print(f"[{prefix}] Failed to save annotation at frame {frame_idx}")
+                    break
+            else:
+                print(f"[{prefix}] No matching shape found at frame {frame_idx}, stopping")
+                break
+            
+            frame_idx += 1
+        
+        progress.close()
+        
+        # 状態を復元
+        self._restore_state(current_state)
+        
+        print(f"[{prefix}] Propagated to {frames_processed} subsequent frames")
+        return frames_processed
     
     def propagate_label_to_subsequent_frames(self, source_shape):
         """Propagate label changes to subsequent frames until tracking fails."""
