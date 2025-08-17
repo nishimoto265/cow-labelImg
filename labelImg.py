@@ -1088,7 +1088,6 @@ class MainWindow(QMainWindow, WindowMixin):
         shape.paint_label = self.display_label_option.isChecked()
         shape.paint_id = self.draw_id_checkbox.isChecked()
         
-        print(f"[DEBUG] Added shape with label: {shape.label}, paint_id: {shape.paint_id}")
         item = HashableQListWidgetItem(shape.label)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked)
@@ -2435,22 +2434,189 @@ class MainWindow(QMainWindow, WindowMixin):
             # Quick IDに対応する実際のクラス名を取得（IDサフィックスなし）
             new_label = self.get_class_name_for_quick_id(self.current_quick_id)
             
-            # ラベルを更新
+            # ラベルが変更される場合のみ処理
             old_label = shape.label
-            shape.label = new_label
-            
-            # Track IDを設定
-            
-            # UIを更新
-            self.set_dirty()
-            self.update_combo_box()
-            
-            print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}")
-            
-            # Undo用の状態保存
-            self.save_undo_state('quick_id_change')
+            if old_label != new_label:
+                # 連続ID付けモードの場合はマルチフレーム操作として処理
+                if self.continuous_tracking_mode:
+                    print(f"[QuickID] Starting continuous ID assignment: {old_label} -> {new_label}")
+                    
+                    # マルチフレーム操作として処理
+                    self.apply_quick_id_with_propagation(shape, new_label, old_label)
+                else:
+                    # 通常モード: 単一フレームの変更のみ
+                    # Undo用の状態を変更前に保存
+                    self.save_undo_state('quick_id_change')
+                    
+                    # ラベルを更新
+                    shape.label = new_label
+                    
+                    # リストアイテムも更新
+                    if shape in self.shapes_to_items:
+                        item = self.shapes_to_items[shape]
+                        item.setText(new_label)
+                    
+                    # UIを更新
+                    self.set_dirty()
+                    self.update_combo_box()
+                    
+                    print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}")
         else:
             print("[QuickID] No shape selected for ID application")
+    
+    def apply_quick_id_with_propagation(self, shape, new_label, old_label):
+        """連続ID付けモードでラベルを適用し、後続フレームに伝播させる（マルチフレーム操作）"""
+        if not self.continuous_tracking_mode or not shape:
+            return
+        
+        # 現在のフレーム情報を保存
+        current_file = self.file_path
+        current_idx = self.cur_img_idx
+        
+        # マルチフレーム操作を開始
+        multi_frame_op = self.undo_manager.start_multi_frame_operation(
+            'continuous_id_assignment',
+            f'Continuous ID assignment: {old_label} -> {new_label}'
+        )
+        
+        # まず現在のフレームの変更を記録
+        before_state = self.get_current_state()
+        shape.label = new_label
+        
+        # リストアイテムも更新
+        if shape in self.shapes_to_items:
+            item = self.shapes_to_items[shape]
+            item.setText(new_label)
+        
+        # UIを更新
+        self.set_dirty()
+        self.update_combo_box()
+        
+        # 現在のフレームを保存（必要なら）
+        if self.auto_saving.isChecked() and self.default_save_dir:
+            self.save_file()
+        
+        after_state = self.get_current_state()
+        multi_frame_op.add_frame_change(current_file, before_state, after_state)
+        
+        print(f"[QuickID] Applied to current frame: {old_label} -> {new_label}")
+        
+        # 後続フレームに伝播
+        frames_processed = self._propagate_quick_id_to_subsequent_frames(shape, multi_frame_op, new_label)
+        
+        # マルチフレーム操作を保存
+        if multi_frame_op.frame_changes:
+            self.undo_manager.save_multi_frame_operation(multi_frame_op)
+            print(f"[QuickID] Saved multi-frame operation for {len(multi_frame_op.frame_changes)} frames")
+        
+        # 元のフレームに戻る
+        if self.file_path != current_file:
+            self.load_file(current_file, preserve_zoom=True)
+        
+        # ステータスメッセージ
+        if frames_processed > 0:
+            self.statusBar().showMessage(f'連続ID付けが完了しました。{frames_processed + 1}フレームに適用しました。', 3000)
+        else:
+            self.statusBar().showMessage(f'IDを変更しました: {old_label} -> {new_label}', 3000)
+    
+    def _propagate_quick_id_to_subsequent_frames(self, source_shape, multi_frame_op, new_label):
+        """後続フレームにQuick IDを伝播させる（マルチフレーム操作用）"""
+        # 現在の状態を保存
+        current_state = {
+            'frame_idx': self.cur_img_idx,
+            'dirty': self.dirty,
+            'file_path': self.file_path
+        }
+        
+        prev_shape = source_shape.copy()
+        frame_idx = current_state['frame_idx'] + 1
+        frames_processed = 0
+        
+        # 画像サイズを取得
+        image_size = None
+        if hasattr(self, 'image') and self.image and not self.image.isNull():
+            image_size = self.image.size()
+        
+        # プログレスダイアログを作成
+        progress = QProgressDialog("連続ID付け処理中...", "キャンセル", 0, 
+                                  self.img_count - frame_idx, self)
+        progress.setWindowTitle("処理中")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        
+        while frame_idx < self.img_count:
+            # キャンセルチェック
+            if progress.wasCanceled():
+                print(f"[QuickID] Cancelled by user at frame {frame_idx}")
+                break
+            
+            # プログレス更新
+            progress.setValue(frame_idx - current_state['frame_idx'])
+            progress.setLabelText(f"処理中: フレーム {frame_idx + 1}/{self.img_count}")
+            QApplication.processEvents()
+            
+            # 次のフレームのアノテーションを読み込む
+            next_file = self.m_img_list[frame_idx]
+            annotation_paths = self._get_annotation_paths(next_file)
+            shapes_data = self._load_annotation_shapes_with_size(annotation_paths, next_file, image_size)
+            
+            if not shapes_data:
+                print(f"[QuickID] No annotation found at frame {frame_idx}, stopping")
+                break
+            
+            # マッチする形状を探す
+            best_match_idx, best_iou = self._find_best_match(shapes_data, prev_shape)
+            
+            if best_match_idx >= 0:
+                # 現在のラベルをチェック
+                current_label = shapes_data[best_match_idx][0]
+                
+                # 既に同じラベルの場合は停止
+                if current_label == new_label:
+                    print(f"[QuickID] Already has label '{new_label}' at frame {frame_idx}, stopping")
+                    break
+                
+                # フレームをロードして変更前の状態を保存
+                self.load_file(next_file, preserve_zoom=True)
+                before_state = self.get_current_state()
+                
+                # ラベルを更新
+                print(f"[QuickID] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current: {current_label})")
+                shapes_data[best_match_idx] = self._update_shape_label(shapes_data[best_match_idx], new_label)
+                
+                # アノテーションを保存
+                if self._save_propagated_annotation_with_size(annotation_paths, shapes_data, next_file, image_size):
+                    # フレームをリロードして変更後の状態を保存
+                    self.load_file(next_file, preserve_zoom=True)
+                    after_state = self.get_current_state()
+                    
+                    # マルチフレーム操作に変更を追加
+                    multi_frame_op.add_frame_change(next_file, before_state, after_state)
+                    
+                    # 次の反復用にprev_shapeを更新
+                    points = shapes_data[best_match_idx][1]
+                    prev_shape = Shape(label=new_label)
+                    for x, y in points:
+                        prev_shape.add_point(QPointF(x, y))
+                    prev_shape.close()
+                    frames_processed += 1
+                else:
+                    print(f"[QuickID] Failed to save annotation at frame {frame_idx}")
+                    break
+            else:
+                print(f"[QuickID] No matching shape found at frame {frame_idx}, stopping")
+                break
+            
+            frame_idx += 1
+        
+        progress.close()
+        
+        # 状態を復元
+        self._restore_state(current_state)
+        
+        print(f"[QuickID] Propagated to {frames_processed} subsequent frames")
+        return frames_processed
     
     def get_class_name_for_quick_id(self, quick_id):
         """Quick IDに対応するクラス名を取得（classes.txtから直接）"""
