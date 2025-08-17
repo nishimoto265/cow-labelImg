@@ -1192,7 +1192,14 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.label_list.item(i).setCheckState(2)
 
     def default_label_combo_selection_changed(self, index):
-        self.default_label=self.label_hist[index]
+        self.default_label = self.label_hist[index]
+        
+        # Quick ID Selectorも同期更新
+        if self.quick_id_selector and self.quick_id_selector.isVisible():
+            id_str = str(index + 1)
+            self.quick_id_selector.set_current_id(id_str)
+            self.current_quick_id = id_str
+            self.update_current_id_display()
 
     def label_selection_changed(self):
         item = self.current_item()
@@ -2349,6 +2356,15 @@ class MainWindow(QMainWindow, WindowMixin):
         self.update_current_id_display()
         
         print(f"[QuickID] ID selected from selector: {id_str}")
+        
+        # デフォルトラベルコンボボックスも同期更新
+        try:
+            index = int(id_str) - 1
+            if 0 <= index < len(self.label_hist):
+                self.default_label_combo_box.cb.setCurrentIndex(index)
+                self.default_label = self.label_hist[index]
+        except (ValueError, IndexError):
+            pass
         
         # 選択中のBBにIDを適用
         self.apply_quick_id_to_selected_shape()
