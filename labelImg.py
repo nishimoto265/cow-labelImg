@@ -1539,15 +1539,25 @@ class MainWindow(QMainWindow, WindowMixin):
                     self.restore_state(current_state)
                     return
             
-            # Check if we're in the middle of undo history
-            if manager.history and manager.current_index >= 0:
-                if manager.current_index < len(manager.history) - 1:
-                    # We've done an undo, use the undo manager's state
-                    current_state = manager.get_current_state()
-                    if current_state:
-                        print(f"[DEBUG] Using undo manager state instead of disk for {self.file_path}")
-                        self.restore_state(current_state)
-                        return
+            # Only use undo manager state if we're in the middle of undo history
+            # (i.e., we've undone some operations and haven't made new changes yet)
+            # OR if we just performed an undo/redo operation
+            use_undo_state = False
+            
+            # Check if we just performed an undo/redo
+            if hasattr(self, '_just_performed_undo_redo') and self._just_performed_undo_redo:
+                use_undo_state = True
+                self._just_performed_undo_redo = False  # Clear the flag
+            # Check if we're in the middle of undo history (not at the latest state)
+            elif manager.history and 0 <= manager.current_index < len(manager.history) - 1:
+                use_undo_state = True
+            
+            if use_undo_state and manager.history and manager.current_index >= 0:
+                current_state = manager.get_current_state()
+                if current_state:
+                    print(f"[DEBUG] Using undo manager state for {self.file_path} (index: {manager.current_index}/{len(manager.history)-1})")
+                    self.restore_state(current_state)
+                    return
         
         if self.default_save_dir is not None:
             basename = os.path.basename(os.path.splitext(file_path)[0])
@@ -1897,6 +1907,28 @@ class MainWindow(QMainWindow, WindowMixin):
             self.set_clean()
             self.statusBar().showMessage('Saved to  %s' % annotation_file_path)
             self.statusBar().show()
+            
+            # After saving to disk, update the undo manager's current state
+            # This ensures that when we navigate back to this frame,
+            # the undo manager has the correct state that matches the disk
+            if hasattr(self, 'undo_manager') and self.file_path:
+                current_state = self.get_current_state()
+                if current_state:
+                    # Save the current state as the latest in undo history
+                    # This ensures the undo manager is in sync with what's on disk
+                    self.undo_manager.set_current_frame(self.file_path)
+                    manager = self.undo_manager.get_manager(self.file_path)
+                    # Clear the _just_performed_undo_redo flag if it exists
+                    if hasattr(self, '_just_performed_undo_redo'):
+                        self._just_performed_undo_redo = False
+                    # Update the manager's current state to match what we just saved
+                    # We don't want to add a new undo state, just update the current one
+                    if manager.history and manager.current_index >= 0:
+                        # Update the current state in history to match what was saved
+                        manager.history[manager.current_index] = current_state
+                    elif not manager.history:
+                        # If there's no history yet, initialize with the saved state
+                        manager.initialize_with_state(current_state)
 
     def close_file(self, _value=False):
         if not self.may_continue():
@@ -2201,9 +2233,13 @@ class MainWindow(QMainWindow, WindowMixin):
         self.undo_manager.set_current_frame(self.file_path)
         
         print(f"[DEBUG] Can undo? {self.undo_manager.can_undo()}")
+        
+        # Set flag to indicate we just performed an undo
+        self._just_performed_undo_redo = True
         if not self.undo_manager.can_undo():
             print("[DEBUG] Cannot undo - showing status message")
             self.statusBar().showMessage('Nothing to undo', 2000)
+            self._just_performed_undo_redo = False
             return
         
         
@@ -2236,8 +2272,12 @@ class MainWindow(QMainWindow, WindowMixin):
         
         self.undo_manager.set_current_frame(self.file_path)
         
+        # Set flag to indicate we just performed a redo
+        self._just_performed_undo_redo = True
+        
         if not self.undo_manager.can_redo():
             self.statusBar().showMessage('Nothing to redo', 2000)
+            self._just_performed_undo_redo = False
             return
         
         # Redo実行
