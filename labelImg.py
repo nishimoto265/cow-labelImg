@@ -41,7 +41,6 @@ from libs.labelDialog import LabelDialog
 from libs.colorDialog import ColorDialog
 from libs.labelFile import LabelFile, LabelFileError, LabelFileFormat
 from libs.toolBar import ToolBar
-from libs.undo_manager import FrameUndoManager
 from libs.pascal_voc_io import PascalVocReader
 from libs.pascal_voc_io import XML_EXT
 from libs.yolo_io import YoloReader
@@ -139,10 +138,6 @@ class MainWindow(QMainWindow, WindowMixin):
         self.click_change_label_mode = False
         self._applying_label = False
         
-        # Initialize Undo/Redo manager
-        self.undo_manager = FrameUndoManager(max_history_per_frame=30)
-        print("[Main] Undo/Redo manager initialized")
-        print(f"[DEBUG] UndoManager created: {self.undo_manager}")
         
         # Initialize Quick ID Selector
         self.quick_id_selector = QuickIDSelector(parent=self, max_ids=30)
@@ -157,15 +152,6 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Also create QShortcut objects as a fallback
         from PyQt5.QtWidgets import QShortcut
-        from PyQt5.QtGui import QKeySequence
-        
-        self.undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
-        self.undo_shortcut.activated.connect(self.undo_action)
-        print("[DEBUG] QShortcut for Ctrl+Z created")
-        
-        self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
-        self.redo_shortcut.activated.connect(self.redo_action)
-        print("[DEBUG] QShortcut for Ctrl+Y created")
 
         list_layout = QVBoxLayout()
         list_layout.setContentsMargins(0, 0, 0, 0)
@@ -349,8 +335,6 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.drawingPolygon.connect(self.toggle_drawing_sensitive)
         self.canvas.shapeClicked.connect(self.on_shape_clicked)
         
-        # Connect shapeModified signal to save undo state
-        self.canvas.shapeModified.connect(self.on_shape_modified)
 
         self.setCentralWidget(scroll)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
@@ -384,14 +368,6 @@ class MainWindow(QMainWindow, WindowMixin):
         open_prev_image = action(get_str('prevImg'), self.open_prev_image,
                                  'a', 'prev', get_str('prevImgDetail'))
         
-        # Undo/Redo actions
-        print("[DEBUG] Creating undo/redo actions...")
-        undo = action('Undo', self.undo_action,
-                     'Ctrl+Z', 'undo', 'Undo last action')
-        redo = action('Redo', self.redo_action,
-                     'Ctrl+Y', 'redo', 'Redo last action')
-        print(f"[DEBUG] Undo action created: {undo}")
-        print(f"[DEBUG] Redo action created: {redo}")
 
         verify = action(get_str('verifyImg'), self.verify_image,
                         'space', 'verify', get_str('verifyImgDetail'))
@@ -538,7 +514,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Store actions for further handling.
         self.actions = Struct(save=save, save_format=save_format, saveAs=save_as, open=open, close=close, resetAll=reset_all, deleteImg=delete_image,
-                              undo=undo, redo=redo,
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
                               createMode=create_mode, editMode=edit_mode, advancedMode=advanced_mode,
                               shapeLineColor=shape_line_color, shapeFillColor=shape_fill_color,
@@ -586,7 +561,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Add Edit menu
         self.menus.edit = QMenu('Edit', self)
-        add_actions(self.menus.edit, (undo, redo))
+        add_actions(self.menus.edit, ())
         
         add_actions(self.menus.file,
                     (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image, quit))
@@ -739,15 +714,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.select_quick_id("10")
             return
         
-        # Ctrl+Z/Y
-        if event.modifiers() == Qt.ControlModifier:
-            if event.key() == Qt.Key_Z:
-                self.undo_action()
-                return
-            elif event.key() == Qt.Key_Y:
-                self.redo_action()
-                return
-        
         if event.key() == Qt.Key_Control:
             self.canvas.set_drawing_shape_to_square(True)
         
@@ -791,14 +757,6 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.select_quick_id("10")
                 return True
             
-            # Ctrl+Z/Y処理
-            if event.modifiers() == Qt.ControlModifier:
-                if event.key() == Qt.Key_Z:
-                    self.undo_action()
-                    return True
-                elif event.key() == Qt.Key_Y:
-                    self.redo_action()
-                    return True
         
         # ホイールイベント処理
         elif event.type() == event.Wheel:
@@ -1025,7 +983,6 @@ class MainWindow(QMainWindow, WindowMixin):
         text = self.label_dialog.pop_up(item.text())
         if text is not None:
             # Save state before editing label
-            self.save_undo_state("edit_label")
             
             item.setText(text)
             item.setBackground(generate_color_by_text(text))
@@ -1199,7 +1156,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def copy_selected_shape(self):
         # Save state before copying
-        self.save_undo_state("copy_shape")
         
         self.add_label(self.canvas.copy_selected_shape())
         # fix copy and delete
@@ -1269,7 +1225,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if text is not None:
             print(f"[DEBUG] new_shape: Adding shape with label '{text}'")
             # Save state before adding new shape
-            self.save_undo_state("add_shape")
             
             self.prev_label_text = text
             generate_color = generate_color_by_text(text)
@@ -1289,7 +1244,6 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.bb_duplication_mode:
                 self.duplicate_bb_to_subsequent_frames(shape)
         else:
-            # self.canvas.undoLastLine()
             self.canvas.reset_all_lines()
 
     def scroll_request(self, delta, orientation):
@@ -1503,19 +1457,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
             self.canvas.setFocus(True)
             
-            # Initialize undo manager for this file if not already initialized
-            print(f"[DEBUG] Setting undo manager for file: {self.file_path}")
-            self.undo_manager.set_current_frame(self.file_path)
-            
-            # Only initialize with state if this frame has no history yet
-            manager = self.undo_manager.get_manager(self.file_path)
-            if not manager.history:
-                initial_state = self.get_current_state()
-                print(f"[DEBUG] Initial state has {len(initial_state['shapes'])} shapes")
-                manager.initialize_with_state(initial_state)
-                print(f"[DEBUG] Undo manager initialized for new file")
-            else:
-                print(f"[DEBUG] Undo manager already has history for this file (history size: {len(manager.history)})")
             
             return True
         return False
@@ -1527,37 +1468,6 @@ class MainWindow(QMainWindow, WindowMixin):
         return '[{} / {}]'.format(self.cur_img_idx + 1, self.img_count)
 
     def show_bounding_box_from_annotation_file(self, file_path):
-        # Check if we should use undo manager state instead of disk
-        if hasattr(self, 'undo_manager') and self.file_path:
-            manager = self.undo_manager.get_manager(self.file_path)
-            
-            # Check for multi-frame temporary state first
-            if hasattr(manager, '_multi_frame_state'):
-                print(f"[DEBUG] Using multi-frame undo state for {self.file_path}")
-                current_state = manager.get_current_state()
-                if current_state:
-                    self.restore_state(current_state)
-                    return
-            
-            # Only use undo manager state if we're in the middle of undo history
-            # (i.e., we've undone some operations and haven't made new changes yet)
-            # OR if we just performed an undo/redo operation
-            use_undo_state = False
-            
-            # Check if we just performed an undo/redo
-            if hasattr(self, '_just_performed_undo_redo') and self._just_performed_undo_redo:
-                use_undo_state = True
-                self._just_performed_undo_redo = False  # Clear the flag
-            # Check if we're in the middle of undo history (not at the latest state)
-            elif manager.history and 0 <= manager.current_index < len(manager.history) - 1:
-                use_undo_state = True
-            
-            if use_undo_state and manager.history and manager.current_index >= 0:
-                current_state = manager.get_current_state()
-                if current_state:
-                    print(f"[DEBUG] Using undo manager state for {self.file_path} (index: {manager.current_index}/{len(manager.history)-1})")
-                    self.restore_state(current_state)
-                    return
         
         if self.default_save_dir is not None:
             basename = os.path.basename(os.path.splitext(file_path)[0])
@@ -1908,27 +1818,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.statusBar().showMessage('Saved to  %s' % annotation_file_path)
             self.statusBar().show()
             
-            # After saving to disk, update the undo manager's current state
-            # This ensures that when we navigate back to this frame,
-            # the undo manager has the correct state that matches the disk
-            if hasattr(self, 'undo_manager') and self.file_path:
-                current_state = self.get_current_state()
-                if current_state:
-                    # Save the current state as the latest in undo history
-                    # This ensures the undo manager is in sync with what's on disk
-                    self.undo_manager.set_current_frame(self.file_path)
-                    manager = self.undo_manager.get_manager(self.file_path)
-                    # Clear the _just_performed_undo_redo flag if it exists
-                    if hasattr(self, '_just_performed_undo_redo'):
-                        self._just_performed_undo_redo = False
-                    # Update the manager's current state to match what we just saved
-                    # We don't want to add a new undo state, just update the current one
-                    if manager.history and manager.current_index >= 0:
-                        # Update the current state in history to match what was saved
-                        manager.history[manager.current_index] = current_state
-                    elif not manager.history:
-                        # If there's no history yet, initialize with the saved state
-                        manager.initialize_with_state(current_state)
 
     def close_file(self, _value=False):
         if not self.may_continue():
@@ -1974,7 +1863,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def discard_changes_dialog(self):
         yes, no, cancel = QMessageBox.Yes, QMessageBox.No, QMessageBox.Cancel
-        msg = u'You have unsaved changes, would you like to save them and proceed?\nClick "No" to undo all changes.'
+        msg = u'You have unsaved changes, would you like to save them and proceed?\nClick "No" to discard all changes.'
         return QMessageBox.warning(self, u'Attention', msg, yes | no | cancel)
 
     def error_message(self, title, message):
@@ -1998,7 +1887,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if not self.canvas.selected_shape:
             return
             
-        self.save_undo_state("delete_shape")
         deleted_shape = self.canvas.delete_selected()
         self.remove_label(deleted_shape)
         self.set_dirty()
@@ -2113,7 +2001,6 @@ class MainWindow(QMainWindow, WindowMixin):
             shape.paint_id = show_id
         self.canvas.repaint()
 
-    # ==================== Undo/Redo Methods ====================
     
     def get_current_state(self):
         """現在の状態を取得（shapes情報）"""
@@ -2139,254 +2026,6 @@ class MainWindow(QMainWindow, WindowMixin):
         
         return state
     
-    def restore_state(self, state):
-        """状態を復元"""
-        print(f"[DEBUG] restore_state called with state: {state is not None}")
-        if not state:
-            print("[DEBUG] State is None, returning")
-            return
-        print(f"[DEBUG] Restoring {len(state.get('shapes', []))} shapes")
-        
-        # 復元中フラグをセット
-        self.undo_manager.get_manager(self.file_path).set_restoring(True)
-        
-        try:
-            # 現在のshapesをクリア
-            self.canvas.shapes = []
-            self.label_list.clear()
-            self.items_to_shapes.clear()
-            self.shapes_to_items.clear()
-            
-            # shapesを復元
-            for shape_data in state.get('shapes', []):
-                shape = Shape()
-                shape.label = str(shape_data.get('label', ''))
-                shape.points = [QPointF(x, y) for x, y in shape_data['points']]
-                shape.close()
-                shape.difficult = shape_data.get('difficult', False)
-                shape.paint_label = shape_data.get('paint_label', self.display_label_option.isChecked())
-                shape.paint_id = shape_data.get('paint_id', self.draw_id_checkbox.isChecked())
-                
-                # Track IDを復元
-                if 'is_tracked' in shape_data:
-                    shape.is_tracked = shape_data['is_tracked']
-                
-                # 色を復元または生成
-                if 'line_color' in shape_data and shape_data['line_color']:
-                    shape.line_color = QColor(*shape_data['line_color'])
-                elif shape.label:
-                    shape.line_color = generate_color_by_text(shape.label)
-                else:
-                    shape.line_color = DEFAULT_LINE_COLOR
-                
-                if 'fill_color' in shape_data and shape_data['fill_color']:
-                    shape.fill_color = QColor(*shape_data['fill_color'])
-                elif shape.label:
-                    shape.fill_color = generate_color_by_text(shape.label)
-                else:
-                    shape.fill_color = DEFAULT_FILL_COLOR
-                
-                # canvasとlabel listに追加
-                self.canvas.shapes.append(shape)
-                self.add_label(shape)
-            
-            # canvas更新
-            self.canvas.load_shapes(self.canvas.shapes)
-            self.canvas.update()
-            
-            # dirtyフラグを設定
-            self.set_dirty()
-            
-        finally:
-            # 復元中フラグをクリア
-            self.undo_manager.get_manager(self.file_path).set_restoring(False)
-    
-    def save_undo_state(self, operation_type="unknown"):
-        """現在の状態をUndo履歴に保存"""
-        print(f"[DEBUG] save_undo_state called for operation: {operation_type}")
-        if not self.file_path:
-            print("[DEBUG] No file_path in save_undo_state, returning")
-            return
-        
-        print(f"[DEBUG] Setting current frame to: {self.file_path}")
-        self.undo_manager.set_current_frame(self.file_path)
-        state = self.get_current_state()
-        print(f"[DEBUG] Current state has {len(state['shapes'])} shapes")
-        self.undo_manager.save_state(state, operation_type)
-        print(f"[DEBUG] State saved successfully")
-        
-        # Undo/Redoボタンの有効/無効を更新（actionsが初期化されている場合のみ）
-        if hasattr(self, 'actions'):
-            if hasattr(self.actions, 'undo') and self.actions.undo:
-                self.actions.undo.setEnabled(self.undo_manager.can_undo())
-            if hasattr(self.actions, 'redo') and self.actions.redo:
-                self.actions.redo.setEnabled(self.undo_manager.can_redo())
-    
-    def undo_action(self):
-        """Undo実行"""
-        print("[DEBUG] undo_action called!")
-        if not self.file_path:
-            print("[DEBUG] No file_path, returning")
-            return
-        
-        print(f"[DEBUG] Setting current frame for undo: {self.file_path}")
-        self.undo_manager.set_current_frame(self.file_path)
-        
-        print(f"[DEBUG] Can undo? {self.undo_manager.can_undo()}")
-        
-        # Set flag to indicate we just performed an undo
-        self._just_performed_undo_redo = True
-        if not self.undo_manager.can_undo():
-            print("[DEBUG] Cannot undo - showing status message")
-            self.statusBar().showMessage('Nothing to undo', 2000)
-            self._just_performed_undo_redo = False
-            return
-        
-        
-        # Undo実行
-        result = self.undo_manager.undo()
-        if result:
-            # single_frame操作の場合はresult is dict, multi_frame操作の場合はresult is MultiFrameOperation
-            if isinstance(result, dict):
-                # 単一フレーム操作の場合は通常の復元
-                self.restore_state(result)
-            else:
-                # multi_frame操作の場合、現在のフレームが影響を受けているかチェックして必要ならリロード
-                if hasattr(result, 'frame_changes'):
-                    current_frame_affected = any(change['frame_path'] == self.file_path for change in result.frame_changes)
-                    if current_frame_affected:
-                        print(f"[MultiFrame] Current frame {self.file_path} was affected, reloading")
-                        self.load_file(self.file_path)
-            self.statusBar().showMessage('Undo successful', 2000)
-        
-        # ボタンの有効/無効を更新
-        if hasattr(self.actions, 'undo'):
-            self.actions.undo.setEnabled(self.undo_manager.can_undo())
-        if hasattr(self.actions, 'redo'):
-            self.actions.redo.setEnabled(self.undo_manager.can_redo())
-    
-    def redo_action(self):
-        """Redo実行"""
-        if not self.file_path:
-            return
-        
-        self.undo_manager.set_current_frame(self.file_path)
-        
-        # Set flag to indicate we just performed a redo
-        self._just_performed_undo_redo = True
-        
-        if not self.undo_manager.can_redo():
-            self.statusBar().showMessage('Nothing to redo', 2000)
-            self._just_performed_undo_redo = False
-            return
-        
-        # Redo実行
-        result = self.undo_manager.redo()
-        if result:
-            # single_frame操作の場合はresult is dict, multi_frame操作の場合はresult is MultiFrameOperation
-            if isinstance(result, dict):
-                # 単一フレーム操作の場合は通常の復元
-                self.restore_state(result)
-            else:
-                # multi_frame操作の場合、現在のフレームが影響を受けているかチェックして必要ならリロード
-                if hasattr(result, 'frame_changes'):
-                    current_frame_affected = any(change['frame_path'] == self.file_path for change in result.frame_changes)
-                    if current_frame_affected:
-                        print(f"[MultiFrame] Current frame {self.file_path} was affected, reloading")
-                        self.load_file(self.file_path)
-            self.statusBar().showMessage('Redo successful', 2000)
-        
-        # ボタンの有効/無効を更新
-        if hasattr(self.actions, 'undo'):
-            self.actions.undo.setEnabled(self.undo_manager.can_undo())
-        if hasattr(self.actions, 'redo'):
-            self.actions.redo.setEnabled(self.undo_manager.can_redo())
-
-    
-    def undo_multi_frame_operation(self):
-        """複数フレーム操作のUndo"""
-        print("[DEBUG] Executing multi-frame undo")
-        
-        # Save current frame
-        current_file = self.file_path
-        
-        # Execute undo
-        operation = self.undo_manager.undo_multi_frame()
-        if not operation:
-            print("[DEBUG] Multi-frame undo failed")
-            return
-        
-        # Process each affected frame
-        for change in operation.frame_changes:
-            frame_path = change['frame_path']
-            before_state = change['before']
-            
-            # Load frame and restore state
-            print(f"[DEBUG] Restoring frame: {frame_path}")
-            self.load_file(frame_path, preserve_zoom=True)
-            self.restore_state(before_state)
-            
-            # Save if auto-saving is enabled
-            if self.auto_saving.isChecked() and self.default_save_dir:
-                self.save_file()
-        
-        # Return to original frame
-        self.load_file(current_file, preserve_zoom=True)
-        
-        # Update status
-        self.statusBar().showMessage(
-            f'Undone: {operation.operation_type} ({len(operation.frame_changes)} frames)', 
-            3000
-        )
-        
-        # Update button states
-        if hasattr(self.actions, 'undo') and self.actions.undo:
-            self.actions.undo.setEnabled(self.undo_manager.can_undo())
-        if hasattr(self.actions, 'redo') and self.actions.redo:
-            self.actions.redo.setEnabled(self.undo_manager.can_redo())
-    
-    def redo_multi_frame_operation(self):
-        """複数フレーム操作のRedo"""
-        print("[DEBUG] Executing multi-frame redo")
-        
-        # Save current frame
-        current_file = self.file_path
-        
-        # Execute redo
-        operation = self.undo_manager.redo_multi_frame()
-        if not operation:
-            print("[DEBUG] Multi-frame redo failed")
-            return
-        
-        # Process each affected frame
-        for change in operation.frame_changes:
-            frame_path = change['frame_path']
-            after_state = change['after']
-            
-            # Load frame and restore state
-            print(f"[DEBUG] Restoring frame: {frame_path}")
-            self.load_file(frame_path, preserve_zoom=True)
-            self.restore_state(after_state)
-            
-            # Save if auto-saving is enabled
-            if self.auto_saving.isChecked() and self.default_save_dir:
-                self.save_file()
-        
-        # Return to original frame
-        self.load_file(current_file, preserve_zoom=True)
-        
-        # Update status
-        self.statusBar().showMessage(
-            f'Redone: {operation.operation_type} ({len(operation.frame_changes)} frames)', 
-            3000
-        )
-        
-        # Update button states
-        if hasattr(self.actions, 'undo') and self.actions.undo:
-            self.actions.undo.setEnabled(self.undo_manager.can_undo())
-        if hasattr(self.actions, 'redo') and self.actions.redo:
-            self.actions.redo.setEnabled(self.undo_manager.can_redo())
-
     def toggle_draw_square(self):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())
     
@@ -2497,8 +2136,6 @@ class MainWindow(QMainWindow, WindowMixin):
                     self.apply_quick_id_with_propagation(shape, new_label, old_label)
                 else:
                     # 通常モード: 単一フレームの変更のみ
-                    # Undo用の状態を変更前に保存
-                    self.save_undo_state('quick_id_change')
                     
                     # ラベルを更新
                     shape.label = new_label
@@ -2525,11 +2162,6 @@ class MainWindow(QMainWindow, WindowMixin):
         current_file = self.file_path
         current_idx = self.cur_img_idx
         
-        # マルチフレーム操作を開始
-        multi_frame_op = self.undo_manager.start_multi_frame_operation(
-            'continuous_id_assignment',
-            f'Continuous ID assignment: {old_label} -> {new_label}'
-        )
         
         # まず現在のフレームの変更を記録
         before_state = self.get_current_state()
@@ -2549,17 +2181,13 @@ class MainWindow(QMainWindow, WindowMixin):
             self.save_file()
         
         after_state = self.get_current_state()
-        multi_frame_op.add_frame_change(current_file, before_state, after_state)
         
         print(f"[QuickID] Applied to current frame: {old_label} -> {new_label}")
         
         # 後続フレームに伝播
-        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, multi_frame_op, new_label, "QuickID")
+        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, None, new_label, "QuickID")
         
         # マルチフレーム操作を保存
-        if multi_frame_op.frame_changes:
-            self.undo_manager.save_multi_frame_operation(multi_frame_op)
-            print(f"[QuickID] Saved multi-frame operation for {len(multi_frame_op.frame_changes)} frames")
         
         # 元のフレームに戻る
         if self.file_path != current_file:
@@ -2638,11 +2266,6 @@ class MainWindow(QMainWindow, WindowMixin):
         current_file = self.file_path
         current_idx = self.cur_img_idx
         
-        # Start multi-frame operation for undo
-        multi_frame_op = self.undo_manager.start_multi_frame_operation(
-            'bb_duplication', 
-            f'Duplicate BB to {num_frames} frames'
-        )
         
         frames_processed = 0
         frames_with_conflicts = 0
@@ -2742,9 +2365,6 @@ class MainWindow(QMainWindow, WindowMixin):
         progress.close()
         
         # Save multi-frame operation for undo
-        if multi_frame_op.frame_changes:
-            self.undo_manager.save_multi_frame_operation(multi_frame_op)
-            print(f"[BB Duplication] Saved undo information for {len(multi_frame_op.frame_changes)} frames")
         
         # Return to original frame
         self.load_file(current_file, preserve_zoom=True)
@@ -2761,24 +2381,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.click_change_label_mode:
             self.apply_label_to_selected_shape()
     
-    def on_shape_modified(self):
-        """Handle shape modification (move/resize) for undo support."""
-        if not self.file_path or not hasattr(self, '_shape_modify_timer'):
-            # Initialize timer for debouncing shape modifications
-            from PyQt5.QtCore import QTimer
-            self._shape_modify_timer = QTimer()
-            self._shape_modify_timer.setSingleShot(True)
-            self._shape_modify_timer.timeout.connect(self._save_shape_modification)
-            
-        # Reset timer - we'll save state after user stops modifying for 500ms
-        self._shape_modify_timer.stop()
-        self._shape_modify_timer.start(500)
-    
-    def _save_shape_modification(self):
-        """Save shape modification to undo history after debounce."""
-        if self.file_path:
-            print("[DEBUG] Saving shape modification to undo history")
-            self.save_undo_state("shape_modified")
     
     def apply_label_to_selected_shape(self):
         """Apply label to the selected shape based on current settings."""
@@ -2824,8 +2426,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.apply_label_with_propagation(shape, new_label, old_label, item)
         else:
             # Normal single-frame operation
-            # Save state before changing label for undo
-            self.save_undo_state("click_change_label")
             
             # Apply label
             shape.label = new_label
@@ -2852,11 +2452,6 @@ class MainWindow(QMainWindow, WindowMixin):
         current_file = self.file_path
         current_idx = self.cur_img_idx
         
-        # マルチフレーム操作を開始
-        multi_frame_op = self.undo_manager.start_multi_frame_operation(
-            'continuous_label_change',
-            f'Continuous label change: {old_label} -> {new_label}'
-        )
         
         # まず現在のフレームの変更を記録
         before_state = self.get_current_state()
@@ -2879,17 +2474,13 @@ class MainWindow(QMainWindow, WindowMixin):
             self.save_file()
         
         after_state = self.get_current_state()
-        multi_frame_op.add_frame_change(current_file, before_state, after_state)
         
         print(f"[ClickChange] Applied to current frame: {old_label} -> {new_label}")
         
         # 後続フレームに伝播
-        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, multi_frame_op, new_label, "ClickChange")
+        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, None, new_label, "ClickChange")
         
         # マルチフレーム操作を保存
-        if multi_frame_op.frame_changes:
-            self.undo_manager.save_multi_frame_operation(multi_frame_op)
-            print(f"[ClickChange] Saved multi-frame operation for {len(multi_frame_op.frame_changes)} frames")
         
         # 元のフレームに戻る
         if self.file_path != current_file:
@@ -2972,7 +2563,6 @@ class MainWindow(QMainWindow, WindowMixin):
                     after_state = self._create_state_from_shapes_data(next_file, shapes_data)
                     
                     # マルチフレーム操作に変更を追加
-                    multi_frame_op.add_frame_change(next_file, before_state, after_state)
                     
                     # 次の反復用にprev_shapeを更新
                     points = shapes_data[best_match_idx][1]
@@ -3543,8 +3133,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if not curr_shapes:
             return
         
-        # Save state before tracking for undo
-        self.save_undo_state("continuous_tracking")
         
         # Debug: Print before tracking
         print(f"[Tracking] Applying tracking to frame {self.cur_img_idx}")
