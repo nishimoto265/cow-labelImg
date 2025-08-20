@@ -750,6 +750,10 @@ class MainWindow(QMainWindow, WindowMixin):
     def eventFilter(self, obj, event):
         """Global event filter to catch keyboard shortcuts"""
         if event.type() == event.KeyPress:
+            # デバッグ：Ctrlキーと組み合わせのキーを表示
+            if event.modifiers() & Qt.ControlModifier:
+                print(f"[DEBUG] Key pressed with Ctrl: key={event.key()}, text='{event.text()}', modifiers={event.modifiers()}")
+            
             # Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z の処理
             if event.modifiers() == Qt.ControlModifier:
                 if event.key() == Qt.Key_Z:
@@ -2568,20 +2572,20 @@ class MainWindow(QMainWindow, WindowMixin):
             print(f"[ClickChange] Starting continuous label change: {old_label} -> {new_label}")
             self.apply_label_with_propagation(shape, new_label, old_label, item)
         else:
-            # Normal single-frame operation
+            # Normal single-frame operation - use Command pattern
+            print(f"[DEBUG] apply_label_to_selected_shape: Changing label from '{old_label}' to '{new_label}'")
             
-            # Apply label
-            shape.label = new_label
-            item.setText(new_label)
-            
-            # Update shape color based on new label
-            shape.line_color = generate_color_by_text(shape.label)
-            item.setBackground(generate_color_by_text(shape.label))
-            
-            # Mark as dirty and update
-            self.set_dirty()
-            self.canvas.load_shapes(self.canvas.shapes)
-            self.update_combo_box()
+            # Get shape index
+            shape_index = self.canvas.shapes.index(shape) if shape in self.canvas.shapes else -1
+            if shape_index >= 0:
+                # Create and execute ChangeLabelCommand
+                from libs.undo.commands.label_commands import ChangeLabelCommand
+                change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label)
+                result = self.undo_manager.execute_command(change_cmd)
+                print(f"[DEBUG] ChangeLabelCommand executed from click: {result}")
+                print(f"[DEBUG] UndoManager state: {self.undo_manager}")
+            else:
+                print(f"[DEBUG] Shape not found in canvas.shapes for click label change")
         
         # Reset flag
         self._applying_label = False
