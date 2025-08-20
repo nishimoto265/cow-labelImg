@@ -1346,14 +1346,23 @@ class MainWindow(QMainWindow, WindowMixin):
                 def redo(self, app):
                     # Re-add the shape
                     try:
+                        print(f"[DEBUG] TrackAddedShapeCommand.redo called")
                         print(f"[DEBUG] TrackAddedShapeCommand.redo: Re-adding shape '{self.shape_data['label']}'")
+                        print(f"[DEBUG] Canvas shapes before redo execute: {len(app.canvas.shapes)}")
+                        
                         # Call parent's execute to add the shape properly
                         result = super().execute(app)
+                        
+                        print(f"[DEBUG] Canvas shapes after redo execute: {len(app.canvas.shapes)}")
+                        print(f"[DEBUG] Redo execute result: {result}")
+                        
                         if result:
                             self.executed = True
                         return result
                     except Exception as e:
                         print(f"[DEBUG] Error redoing shape: {e}")
+                        import traceback
+                        traceback.print_exc()
                         return False
             
             # Track the shape addition for undo

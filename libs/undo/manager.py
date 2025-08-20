@@ -113,7 +113,14 @@ class UndoManager:
         try:
             self.current_index += 1
             command = self.history[self.current_index]
-            if command.execute(self.app):
+            
+            # Use redo() if available, otherwise use execute()
+            if hasattr(command, 'redo'):
+                result = command.redo(self.app)
+            else:
+                result = command.execute(self.app)
+            
+            if result:
                 self.update_ui()
                 logger.debug(f"Redid command: {command.description}")
                 return True
