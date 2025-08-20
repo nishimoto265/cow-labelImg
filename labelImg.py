@@ -990,14 +990,22 @@ class MainWindow(QMainWindow, WindowMixin):
         item = self.current_item()
         if not item:
             return
-        text = self.label_dialog.pop_up(item.text())
-        if text is not None:
-            # Save state before editing label
-            
-            item.setText(text)
-            item.setBackground(generate_color_by_text(text))
-            self.set_dirty()
-            self.update_combo_box()
+        
+        # Get the shape associated with this item
+        shape = self.items_to_shapes.get(item)
+        if not shape:
+            return
+        
+        old_label = item.text()
+        text = self.label_dialog.pop_up(old_label)
+        if text is not None and text != old_label:
+            # Get shape index
+            shape_index = self.canvas.shapes.index(shape) if shape in self.canvas.shapes else -1
+            if shape_index >= 0:
+                # Create and execute ChangeLabelCommand
+                from libs.undo.commands.label_commands import ChangeLabelCommand
+                change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, text)
+                self.undo_manager.execute_command(change_cmd)
 
     # Tzutalin 20160906 : Add file list and dock to move faster
     def file_item_double_clicked(self, item=None):
