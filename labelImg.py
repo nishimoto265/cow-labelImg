@@ -377,6 +377,10 @@ class MainWindow(QMainWindow, WindowMixin):
                      'Ctrl+Z', 'undo', 'Undo last action')
         redo = action('Redo', self.redo_action,
                      'Ctrl+Y', 'redo', 'Redo last action')
+        
+        # Explicitly add shortcuts
+        undo.setShortcutContext(Qt.ApplicationShortcut)
+        redo.setShortcutContext(Qt.ApplicationShortcut)
 
         verify = action(get_str('verifyImg'), self.verify_image,
                         'space', 'verify', get_str('verifyImgDetail'))
@@ -746,6 +750,22 @@ class MainWindow(QMainWindow, WindowMixin):
     def eventFilter(self, obj, event):
         """Global event filter to catch keyboard shortcuts"""
         if event.type() == event.KeyPress:
+            # Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z の処理
+            if event.modifiers() == Qt.ControlModifier:
+                if event.key() == Qt.Key_Z:
+                    print("[DEBUG] Ctrl+Z pressed in eventFilter")
+                    self.undo_action()
+                    return True
+                elif event.key() == Qt.Key_Y:
+                    print("[DEBUG] Ctrl+Y pressed in eventFilter")
+                    self.redo_action()
+                    return True
+            elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
+                if event.key() == Qt.Key_Z:
+                    print("[DEBUG] Ctrl+Shift+Z pressed in eventFilter")
+                    self.redo_action()
+                    return True
+            
             # DELキー・sキー処理
             if event.key() == Qt.Key_Delete or event.key() == Qt.Key_S:
                 if self.canvas.selected_shape and self.actions.delete.isEnabled():
@@ -999,13 +1019,18 @@ class MainWindow(QMainWindow, WindowMixin):
         old_label = item.text()
         text = self.label_dialog.pop_up(old_label)
         if text is not None and text != old_label:
+            print(f"[DEBUG] edit_label: Changing label from '{old_label}' to '{text}'")
             # Get shape index
             shape_index = self.canvas.shapes.index(shape) if shape in self.canvas.shapes else -1
             if shape_index >= 0:
                 # Create and execute ChangeLabelCommand
                 from libs.undo.commands.label_commands import ChangeLabelCommand
                 change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, text)
-                self.undo_manager.execute_command(change_cmd)
+                result = self.undo_manager.execute_command(change_cmd)
+                print(f"[DEBUG] ChangeLabelCommand executed: {result}")
+                print(f"[DEBUG] UndoManager state: {self.undo_manager}")
+            else:
+                print(f"[DEBUG] Shape not found in canvas.shapes")
 
     # Tzutalin 20160906 : Add file list and dock to move faster
     def file_item_double_clicked(self, item=None):

@@ -58,14 +58,21 @@ class ChangeLabelCommand(Command):
                     item.setText(self.new_label)
                     
                     # Update background color based on label
-                    if hasattr(app, 'generate_color_by_text'):
+                    try:
                         from libs.utils import generate_color_by_text
                         item.setBackground(generate_color_by_text(self.new_label))
                         shape.line_color = generate_color_by_text(self.new_label)
+                        shape.fill_color = generate_color_by_text(self.new_label)
+                    except ImportError:
+                        pass
             
             # Update combo box
             if hasattr(app, 'update_combo_box'):
                 app.update_combo_box()
+            
+            # Update canvas
+            if hasattr(app.canvas, 'update'):
+                app.canvas.update()
             
             # Mark as dirty
             app.set_dirty()
@@ -107,14 +114,21 @@ class ChangeLabelCommand(Command):
                     item.setText(self.old_label)
                     
                     # Update background color based on label
-                    if hasattr(app, 'generate_color_by_text'):
+                    try:
                         from libs.utils import generate_color_by_text
                         item.setBackground(generate_color_by_text(self.old_label))
                         shape.line_color = generate_color_by_text(self.old_label)
+                        shape.fill_color = generate_color_by_text(self.old_label)
+                    except ImportError:
+                        pass
             
             # Update combo box
             if hasattr(app, 'update_combo_box'):
                 app.update_combo_box()
+            
+            # Update canvas
+            if hasattr(app.canvas, 'update'):
+                app.canvas.update()
             
             # Mark as dirty
             app.set_dirty()
@@ -205,6 +219,10 @@ class ApplyQuickIDCommand(Command):
             if hasattr(app, 'update_combo_box'):
                 app.update_combo_box()
             
+            # Update canvas
+            if hasattr(app.canvas, 'update'):
+                app.canvas.update()
+            
             # Mark as dirty
             app.set_dirty()
             
@@ -251,6 +269,10 @@ class ApplyQuickIDCommand(Command):
             # Update combo box
             if hasattr(app, 'update_combo_box'):
                 app.update_combo_box()
+            
+            # Update canvas
+            if hasattr(app.canvas, 'update'):
+                app.canvas.update()
             
             # Mark as dirty
             app.set_dirty()
@@ -530,6 +552,10 @@ class BatchChangeLabelCommand(Command):
             if hasattr(app, 'update_combo_box'):
                 app.update_combo_box()
             
+            # Update canvas
+            if hasattr(app.canvas, 'update'):
+                app.canvas.update()
+            
             # Mark as dirty
             app.set_dirty()
             
@@ -579,6 +605,10 @@ class BatchChangeLabelCommand(Command):
             # Update combo box
             if hasattr(app, 'update_combo_box'):
                 app.update_combo_box()
+            
+            # Update canvas
+            if hasattr(app.canvas, 'update'):
+                app.canvas.update()
             
             # Mark as dirty
             app.set_dirty()

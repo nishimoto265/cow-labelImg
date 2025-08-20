@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python:*)",
       "Bash(uv venv:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }
