@@ -2176,6 +2176,14 @@ class MainWindow(QMainWindow, WindowMixin):
             print("[DEBUG] Undo successful")
             self.canvas.load_shapes(self.canvas.shapes)
             self.canvas.repaint()
+            
+            # Update label list
+            self.label_list.clear()
+            self.shapes_to_items.clear()
+            self.items_to_shapes.clear()
+            for shape in self.canvas.shapes:
+                self.add_label(shape)
+            
             self.statusBar().showMessage('Undo successful', 2000)
         else:
             print("[DEBUG] Undo failed or nothing to undo")
@@ -2197,8 +2205,15 @@ class MainWindow(QMainWindow, WindowMixin):
             self.canvas.load_shapes(self.canvas.shapes)
             self.canvas.repaint()
             
-            # Update label list
-            self.load_labels(self.canvas.shapes)
+            # Update label list by clearing and re-adding all items
+            # Clear existing label list
+            self.label_list.clear()
+            self.shapes_to_items.clear()
+            self.items_to_shapes.clear()
+            
+            # Re-add all shapes to label list
+            for shape in self.canvas.shapes:
+                self.add_label(shape)
             
             self.statusBar().showMessage('Redo successful', 2000)
         else:
