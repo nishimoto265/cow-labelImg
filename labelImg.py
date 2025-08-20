@@ -2163,8 +2163,7 @@ class MainWindow(QMainWindow, WindowMixin):
         current_idx = self.cur_img_idx
         
         
-        # まず現在のフレームの変更を記録
-        before_state = self.get_current_state()
+        # Apply label change to current frame
         shape.label = new_label
         
         # リストアイテムも更新
@@ -2180,12 +2179,10 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.auto_saving.isChecked() and self.default_save_dir:
             self.save_file()
         
-        after_state = self.get_current_state()
-        
         print(f"[QuickID] Applied to current frame: {old_label} -> {new_label}")
         
         # 後続フレームに伝播
-        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, None, new_label, "QuickID")
+        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, new_label, "QuickID")
         
         # マルチフレーム操作を保存
         
@@ -2291,9 +2288,8 @@ class MainWindow(QMainWindow, WindowMixin):
             # Load target frame
             target_file = self.m_img_list[target_idx]
             
-            # Save current state before modification
+            # Load target file
             self.load_file(target_file, preserve_zoom=True)
-            before_state = self.get_current_state()
             
             # Check for overlapping shapes
             shapes_to_remove = []
@@ -2357,14 +2353,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 if self.auto_saving.isChecked() and self.default_save_dir:
                     self.save_file()
             
-            # Record change for undo if any modification was made
-            if modified:
-                after_state = self.get_current_state()
-                multi_frame_op.add_frame_change(target_file, before_state, after_state)
         
         progress.close()
-        
-        # Save multi-frame operation for undo
         
         # Return to original frame
         self.load_file(current_file, preserve_zoom=True)
@@ -2453,9 +2443,6 @@ class MainWindow(QMainWindow, WindowMixin):
         current_idx = self.cur_img_idx
         
         
-        # まず現在のフレームの変更を記録
-        before_state = self.get_current_state()
-        
         # Apply label
         shape.label = new_label
         item.setText(new_label)
@@ -2473,12 +2460,10 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.auto_saving.isChecked() and self.default_save_dir:
             self.save_file()
         
-        after_state = self.get_current_state()
-        
         print(f"[ClickChange] Applied to current frame: {old_label} -> {new_label}")
         
         # 後続フレームに伝播
-        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, None, new_label, "ClickChange")
+        frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, new_label, "ClickChange")
         
         # マルチフレーム操作を保存
         
@@ -2492,7 +2477,7 @@ class MainWindow(QMainWindow, WindowMixin):
         else:
             self.statusBar().showMessage(f'ラベルを変更しました: {old_label} -> {new_label}', 3000)
     
-    def _propagate_label_to_subsequent_frames_multi(self, source_shape, multi_frame_op, new_label, prefix="Propagate"):
+    def _propagate_label_to_subsequent_frames_multi(self, source_shape, new_label, prefix="Propagate"):
         """後続フレームにラベルを伝播させる（マルチフレーム操作用）"""
         # 現在の状態を保存
         current_state = {
@@ -2550,19 +2535,12 @@ class MainWindow(QMainWindow, WindowMixin):
                     print(f"[{prefix}] Already has label '{new_label}' at frame {frame_idx}, stopping")
                     break
                 
-                # 変更前の状態を保存（フレームをロードせずにshapes_dataから作成）
-                before_state = self._create_state_from_shapes_data(next_file, shapes_data)
-                
                 # ラベルを更新
                 print(f"[{prefix}] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current: {current_label})")
                 shapes_data[best_match_idx] = self._update_shape_label(shapes_data[best_match_idx], new_label)
                 
                 # アノテーションを保存
                 if self._save_propagated_annotation_with_size(annotation_paths, shapes_data, next_file, image_size):
-                    # 変更後の状態を保存（フレームをロードせずにshapes_dataから作成）
-                    after_state = self._create_state_from_shapes_data(next_file, shapes_data)
-                    
-                    # マルチフレーム操作に変更を追加
                     
                     # 次の反復用にprev_shapeを更新
                     points = shapes_data[best_match_idx][1]
