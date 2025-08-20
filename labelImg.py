@@ -376,10 +376,7 @@ class MainWindow(QMainWindow, WindowMixin):
         undo = action('Undo', self.undo_action,
                      'Ctrl+Z', 'undo', 'Undo last action')
         redo = action('Redo', self.redo_action,
-                     'Ctrl+Y', 'redo', 'Redo last action')
-        
-        # Add alternative shortcuts for redo
-        redo.setShortcuts(['Ctrl+Y', 'Ctrl+Shift+Z', 'Ctrl+R'])
+                     'Ctrl+Shift+Z', 'redo', 'Redo last action')
         
         # Explicitly add shortcuts
         undo.setShortcutContext(Qt.ApplicationShortcut)
@@ -759,19 +756,11 @@ class MainWindow(QMainWindow, WindowMixin):
                 # Qt.Key_Y = 89, Qt.Key_Z = 90
                 print(f"[DEBUG] Qt.Key_Y={Qt.Key_Y}, Qt.Key_Z={Qt.Key_Z}")
             
-            # Ctrl+Z / Ctrl+Y / Ctrl+R / Ctrl+Shift+Z の処理
+            # Ctrl+Z / Ctrl+Shift+Z の処理
             if event.modifiers() == Qt.ControlModifier:
                 if event.key() == Qt.Key_Z or event.key() == 90:
                     print("[DEBUG] Ctrl+Z pressed in eventFilter")
                     self.undo_action()
-                    return True
-                elif event.key() == Qt.Key_Y or event.key() == 89:
-                    print("[DEBUG] Ctrl+Y pressed in eventFilter")
-                    self.redo_action()
-                    return True
-                elif event.key() == Qt.Key_R or event.key() == 82:
-                    print("[DEBUG] Ctrl+R pressed in eventFilter (alternative redo)")
-                    self.redo_action()
                     return True
             elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
                 if event.key() == Qt.Key_Z:
@@ -1321,6 +1310,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 def undo(self, app):
                     # Remove the shape that was added
                     try:
+                        print(f"[DEBUG] TrackAddedShapeCommand.undo: Removing shape at index {self.shape_index}")
                         if app.file_path != self.frame_path:
                             app.load_file(self.frame_path, preserve_zoom=True)
                         
@@ -1351,6 +1341,19 @@ class MainWindow(QMainWindow, WindowMixin):
                         return True
                     except Exception as e:
                         print(f"[DEBUG] Error undoing shape: {e}")
+                        return False
+                
+                def redo(self, app):
+                    # Re-add the shape
+                    try:
+                        print(f"[DEBUG] TrackAddedShapeCommand.redo: Re-adding shape '{self.shape_data['label']}'")
+                        # Call parent's execute to add the shape properly
+                        result = super().execute(app)
+                        if result:
+                            self.executed = True
+                        return result
+                    except Exception as e:
+                        print(f"[DEBUG] Error redoing shape: {e}")
                         return False
             
             # Track the shape addition for undo
@@ -2182,11 +2185,21 @@ class MainWindow(QMainWindow, WindowMixin):
         """Redo the last undone action"""
         print("[DEBUG] redo_action called")
         print(f"[DEBUG] Can redo: {self.undo_manager.can_redo()}")
+        print(f"[DEBUG] History before redo: {self.undo_manager.get_history_info()}")
+        print(f"[DEBUG] Canvas shapes before redo: {len(self.canvas.shapes)} shapes")
         
         if self.undo_manager.redo():
             print("[DEBUG] Redo successful")
+            print(f"[DEBUG] Canvas shapes after redo: {len(self.canvas.shapes)} shapes")
+            print(f"[DEBUG] History after redo: {self.undo_manager.get_history_info()}")
+            
+            # Reload shapes and update UI
             self.canvas.load_shapes(self.canvas.shapes)
             self.canvas.repaint()
+            
+            # Update label list
+            self.load_labels(self.canvas.shapes)
+            
             self.statusBar().showMessage('Redo successful', 2000)
         else:
             print("[DEBUG] Redo failed or nothing to redo")
