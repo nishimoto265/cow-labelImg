@@ -138,6 +138,10 @@ class MainWindow(QMainWindow, WindowMixin):
         self.click_change_label_mode = False
         self._applying_label = False
         
+        # Initialize Undo/Redo Manager
+        from libs.undo.manager import UndoManager
+        self.undo_manager = UndoManager(self, max_history=100)
+        print("[DEBUG] Undo/Redo manager initialized")
         
         # Initialize Quick ID Selector
         self.quick_id_selector = QuickIDSelector(parent=self, max_ids=30)
@@ -368,6 +372,11 @@ class MainWindow(QMainWindow, WindowMixin):
         open_prev_image = action(get_str('prevImg'), self.open_prev_image,
                                  'a', 'prev', get_str('prevImgDetail'))
         
+        # Undo/Redo actions
+        undo = action('Undo', self.undo_action,
+                     'Ctrl+Z', 'undo', 'Undo last action')
+        redo = action('Redo', self.redo_action,
+                     'Ctrl+Shift+Z', 'redo', 'Redo last action')
 
         verify = action(get_str('verifyImg'), self.verify_image,
                         'space', 'verify', get_str('verifyImgDetail'))
@@ -514,6 +523,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Store actions for further handling.
         self.actions = Struct(save=save, save_format=save_format, saveAs=save_as, open=open, close=close, resetAll=reset_all, deleteImg=delete_image,
+                              undo=undo, redo=redo,
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
                               createMode=create_mode, editMode=edit_mode, advancedMode=advanced_mode,
                               shapeLineColor=shape_line_color, shapeFillColor=shape_fill_color,
@@ -561,7 +571,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Add Edit menu
         self.menus.edit = QMenu('Edit', self)
-        add_actions(self.menus.edit, ())
+        add_actions(self.menus.edit, (undo, redo, None, edit, copy, delete))
         
         add_actions(self.menus.file,
                     (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image, quit))
@@ -1224,25 +1234,74 @@ class MainWindow(QMainWindow, WindowMixin):
         self.diffc_button.setChecked(False)
         if text is not None:
             print(f"[DEBUG] new_shape: Adding shape with label '{text}'")
-            # Save state before adding new shape
             
             self.prev_label_text = text
-            generate_color = generate_color_by_text(text)
-            shape = self.canvas.set_last_label(text, generate_color, generate_color)
-            self.add_label(shape)
-            if self.beginner():  # Switch to edit mode.
-                self.canvas.set_editing(True)
-                self.actions.create.setEnabled(True)
-            else:
-                self.actions.editMode.setEnabled(True)
-            self.set_dirty()
-
-            if text not in self.label_hist:
-                self.label_hist.append(text)
             
-            # Apply BB duplication if enabled
-            if self.bb_duplication_mode:
-                self.duplicate_bb_to_subsequent_frames(shape)
+            # Get the shape that was just drawn (last shape in canvas)
+            if self.canvas.shapes:
+                # The shape already exists in canvas.shapes, we need to capture its data
+                # before we proceed with the command pattern
+                last_shape = self.canvas.shapes[-1]
+                
+                # Create shape data from the drawn shape
+                shape_data = {
+                    'label': text,
+                    'points': [(p.x(), p.y()) for p in last_shape.points],
+                    'difficult': last_shape.difficult if hasattr(last_shape, 'difficult') else False
+                }
+                
+                # Set color
+                generate_color = generate_color_by_text(text)
+                shape_data['line_color'] = generate_color
+                shape_data['fill_color'] = generate_color
+                
+                # Remove the shape from canvas temporarily (will be re-added by command)
+                self.canvas.shapes.pop()
+                
+                # Create and execute AddShapeCommand
+                from libs.undo.commands.shape_commands import AddShapeCommand
+                from libs.undo.commands.composite_command import CompositeCommand
+                
+                if self.bb_duplication_mode:
+                    # Create composite command for BB duplication
+                    commands = []
+                    
+                    # First add the shape to current frame
+                    add_cmd = AddShapeCommand(self.file_path, shape_data)
+                    commands.append(add_cmd)
+                    
+                    # Then duplicate to subsequent frames
+                    num_frames = self.bb_dup_frame_count.value()
+                    current_idx = self.cur_img_idx
+                    
+                    for i in range(1, num_frames + 1):
+                        target_idx = current_idx + i
+                        if target_idx >= self.img_count:
+                            break
+                        
+                        target_file = self.m_img_list[target_idx]
+                        dup_cmd = AddShapeCommand(target_file, shape_data)
+                        commands.append(dup_cmd)
+                    
+                    # Execute composite command
+                    composite_cmd = CompositeCommand(
+                        commands, 
+                        f"Add shape with BB duplication to {len(commands)-1} frames"
+                    )
+                    self.undo_manager.execute_command(composite_cmd)
+                else:
+                    # Just add the shape normally
+                    add_cmd = AddShapeCommand(self.file_path, shape_data)
+                    self.undo_manager.execute_command(add_cmd)
+                
+                if self.beginner():  # Switch to edit mode.
+                    self.canvas.set_editing(True)
+                    self.actions.create.setEnabled(True)
+                else:
+                    self.actions.editMode.setEnabled(True)
+                
+                if text not in self.label_hist:
+                    self.label_hist.append(text)
         else:
             self.canvas.reset_all_lines()
 
@@ -1886,17 +1945,24 @@ class MainWindow(QMainWindow, WindowMixin):
     def delete_selected_shape(self):
         if not self.canvas.selected_shape:
             return
-            
-        deleted_shape = self.canvas.delete_selected()
-        self.remove_label(deleted_shape)
-        self.set_dirty()
-        if self.no_shapes():
-            for action in self.actions.onShapesPresent:
-                action.setEnabled(False)
         
-        # Quick ID Selectorの不足ラベルを更新
-        if hasattr(self, 'quick_id_selector') and self.quick_id_selector.isVisible():
-            self.quick_id_selector.update_missing_labels()
+        # Get the shape to delete and its index
+        shape_to_delete = self.canvas.selected_shape
+        shape_index = self.canvas.shapes.index(shape_to_delete)
+        
+        # Create and execute DeleteShapeCommand
+        from libs.undo.commands.shape_commands import DeleteShapeCommand
+        delete_cmd = DeleteShapeCommand(self.file_path, shape_index, shape_to_delete)
+        
+        if self.undo_manager.execute_command(delete_cmd):
+            # Update UI
+            if self.no_shapes():
+                for action in self.actions.onShapesPresent:
+                    action.setEnabled(False)
+            
+            # Quick ID Selectorの不足ラベルを更新
+            if hasattr(self, 'quick_id_selector') and self.quick_id_selector.isVisible():
+                self.quick_id_selector.update_missing_labels()
 
     def choose_shape_line_color(self):
         color = self.color_dialog.getColor(self.line_color, u'Choose Line Color',
@@ -2025,6 +2091,24 @@ class MainWindow(QMainWindow, WindowMixin):
             state['shapes'].append(shape_data)
         
         return state
+    
+    def undo_action(self):
+        """Undo the last action"""
+        if self.undo_manager.undo():
+            self.canvas.load_shapes(self.canvas.shapes)
+            self.canvas.repaint()
+            self.statusBar().showMessage('Undo successful', 2000)
+        else:
+            self.statusBar().showMessage('Nothing to undo', 2000)
+    
+    def redo_action(self):
+        """Redo the last undone action"""
+        if self.undo_manager.redo():
+            self.canvas.load_shapes(self.canvas.shapes)
+            self.canvas.repaint()
+            self.statusBar().showMessage('Redo successful', 2000)
+        else:
+            self.statusBar().showMessage('Nothing to redo', 2000)
     
     def toggle_draw_square(self):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())

@@ -69,7 +69,16 @@ class AddShapeCommand(Command):
             
             # Add to canvas
             app.canvas.shapes.append(shape)
-            app.add_label(shape)
+            
+            # Add to label list
+            if hasattr(app, 'add_label'):
+                app.add_label(shape)
+            
+            # Update canvas
+            if hasattr(app.canvas, 'load_shapes'):
+                app.canvas.load_shapes(app.canvas.shapes)
+            elif hasattr(app.canvas, 'update'):
+                app.canvas.update()
             
             # Store reference for undo
             self.shape_index = len(app.canvas.shapes) - 1
@@ -108,17 +117,19 @@ class AddShapeCommand(Command):
             # Remove shape from canvas
             if self.shape_index is not None and self.shape_index < len(app.canvas.shapes):
                 shape = app.canvas.shapes[self.shape_index]
+                
+                # Remove from label list first
+                if hasattr(app, 'remove_label'):
+                    app.remove_label(shape)
+                
+                # Then remove from canvas
                 app.canvas.shapes.remove(shape)
                 
-                # Remove from label list
-                if hasattr(app, 'shapes_to_items') and shape in app.shapes_to_items:
-                    item = app.shapes_to_items[shape]
-                    if hasattr(app, 'label_list'):
-                        row = app.label_list.row(item)
-                        app.label_list.takeItem(row)
-                    del app.shapes_to_items[shape]
-                    if hasattr(app, 'items_to_shapes') and item in app.items_to_shapes:
-                        del app.items_to_shapes[item]
+                # Update canvas
+                if hasattr(app.canvas, 'load_shapes'):
+                    app.canvas.load_shapes(app.canvas.shapes)
+                elif hasattr(app.canvas, 'update'):
+                    app.canvas.update()
             
             # Mark as dirty
             app.set_dirty()
@@ -201,17 +212,23 @@ class DeleteShapeCommand(Command):
             # Remove shape from canvas
             if self.shape_index < len(app.canvas.shapes):
                 shape = app.canvas.shapes[self.shape_index]
-                app.canvas.shapes.remove(shape)
                 
-                # Remove from label list
-                if hasattr(app, 'shapes_to_items') and shape in app.shapes_to_items:
-                    item = app.shapes_to_items[shape]
-                    if hasattr(app, 'label_list'):
-                        row = app.label_list.row(item)
-                        app.label_list.takeItem(row)
-                    del app.shapes_to_items[shape]
-                    if hasattr(app, 'items_to_shapes') and item in app.items_to_shapes:
-                        del app.items_to_shapes[item]
+                # Select the shape first if canvas has selection
+                if hasattr(app.canvas, 'selected_shape'):
+                    app.canvas.selected_shape = shape
+                
+                # Use canvas's delete method if available
+                if hasattr(app.canvas, 'delete_selected'):
+                    deleted_shape = app.canvas.delete_selected()
+                    if hasattr(app, 'remove_label'):
+                        app.remove_label(deleted_shape)
+                else:
+                    # Manual removal
+                    if hasattr(app, 'remove_label'):
+                        app.remove_label(shape)
+                    app.canvas.shapes.remove(shape)
+                    if hasattr(app.canvas, 'update'):
+                        app.canvas.update()
             
             # Mark as dirty
             app.set_dirty()
@@ -264,7 +281,16 @@ class DeleteShapeCommand(Command):
             
             # Insert at original position
             app.canvas.shapes.insert(self.shape_index, shape)
-            app.add_label(shape)
+            
+            # Add back to label list
+            if hasattr(app, 'add_label'):
+                app.add_label(shape)
+            
+            # Update canvas
+            if hasattr(app.canvas, 'load_shapes'):
+                app.canvas.load_shapes(app.canvas.shapes)
+            elif hasattr(app.canvas, 'update'):
+                app.canvas.update()
             
             # Mark as dirty
             app.set_dirty()
@@ -644,7 +670,16 @@ class DuplicateShapeCommand(Command):
             
             # Add to canvas
             app.canvas.shapes.append(shape)
-            app.add_label(shape)
+            
+            # Add to label list
+            if hasattr(app, 'add_label'):
+                app.add_label(shape)
+            
+            # Update canvas
+            if hasattr(app.canvas, 'load_shapes'):
+                app.canvas.load_shapes(app.canvas.shapes)
+            elif hasattr(app.canvas, 'update'):
+                app.canvas.update()
             
             # Store index for undo
             self.duplicated_shape_index = len(app.canvas.shapes) - 1
