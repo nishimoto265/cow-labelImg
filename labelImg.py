@@ -1384,6 +1384,7 @@ class MainWindow(QMainWindow, WindowMixin):
             
             # Apply BB duplication if enabled
             if self.bb_duplication_mode:
+                print("[WARNING] BB duplication mode is enabled but not yet integrated with undo/redo")
                 self.duplicate_bb_to_subsequent_frames(shape)
         else:
             self.canvas.reset_all_lines()
@@ -2616,6 +2617,7 @@ class MainWindow(QMainWindow, WindowMixin):
         # If continuous tracking mode is ON, use multi-frame operation
         if self.continuous_tracking_mode:
             print(f"[ClickChange] Starting continuous label change: {old_label} -> {new_label}")
+            print("[WARNING] Continuous tracking mode is enabled but not yet integrated with undo/redo")
             self.apply_label_with_propagation(shape, new_label, old_label, item)
         else:
             # Normal single-frame operation - use Command pattern
