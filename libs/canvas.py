@@ -67,6 +67,11 @@ class Canvas(QWidget):
         self.setFocusPolicy(Qt.WheelFocus)
         self.verified = False
         self.draw_square = False
+        
+        # For tracking shape movement/resize for undo/redo
+        self.shape_move_start = None
+        self.shape_resize_start = None
+        self.selected_shape_index = None
         self.show_bounding_boxes = True  # デフォルトでBBを表示
 
         # initialisation for panning
@@ -272,6 +277,20 @@ class Canvas(QWidget):
                 selection = self.select_shape_point(pos)
                 self.prev_point = pos
 
+                # Track the start of shape movement/resize for undo/redo
+                if self.selected_shape:
+                    self.selected_shape_index = self.shapes.index(self.selected_shape) if self.selected_shape in self.shapes else None
+                    if self.selected_vertex():
+                        # Starting resize
+                        self.shape_resize_start = [
+                            (p.x(), p.y()) for p in self.selected_shape.points
+                        ]
+                    else:
+                        # Starting move
+                        self.shape_move_start = [
+                            (p.x(), p.y()) for p in self.selected_shape.points
+                        ]
+
                 if selection is None:
                     # pan
                     QApplication.setOverrideCursor(QCursor(Qt.OpenHandCursor))
@@ -292,14 +311,27 @@ class Canvas(QWidget):
                 self.selected_shape_copy = None
                 self.repaint()
         elif ev.button() == Qt.LeftButton and self.selected_shape:
-            if self.selected_vertex():
+            # Check if shape was moved or resized
+            if self.selected_vertex() and self.shape_resize_start:
+                # Shape was resized
+                new_points = [(p.x(), p.y()) for p in self.selected_shape.points]
+                if new_points != self.shape_resize_start:
+                    # Create resize command
+                    self.create_resize_command(self.shape_resize_start, new_points)
+                self.shape_resize_start = None
                 self.override_cursor(CURSOR_POINT)
-                # Emit signal that shape was modified (vertex moved)
+                self.shapeModified.emit()
+            elif self.shape_move_start:
+                # Shape was moved
+                new_points = [(p.x(), p.y()) for p in self.selected_shape.points]
+                if new_points != self.shape_move_start:
+                    # Create move command
+                    self.create_move_command(self.shape_move_start, new_points)
+                self.shape_move_start = None
+                self.override_cursor(CURSOR_GRAB)
                 self.shapeModified.emit()
             else:
                 self.override_cursor(CURSOR_GRAB)
-                # Emit signal that shape was modified (shape moved)
-                self.shapeModified.emit()
         elif ev.button() == Qt.LeftButton:
             pos = self.transform_pos(ev.pos())
             if self.drawing():
@@ -775,3 +807,39 @@ class Canvas(QWidget):
 
     def set_drawing_shape_to_square(self, status):
         self.draw_square = status
+    
+    def create_move_command(self, old_points, new_points):
+        """Create and execute a move command through the main window"""
+        try:
+            # Get the main window
+            main_window = self.parent().window()
+            if hasattr(main_window, 'undo_manager') and self.selected_shape_index is not None:
+                from libs.undo.commands.shape_movement_commands import MoveShapeCommand
+                move_cmd = MoveShapeCommand(
+                    main_window.file_path,
+                    self.selected_shape_index,
+                    old_points,
+                    new_points
+                )
+                main_window.undo_manager.execute_command(move_cmd)
+                print(f"[DEBUG] Move command executed for shape at index {self.selected_shape_index}")
+        except Exception as e:
+            print(f"[DEBUG] Error creating move command: {e}")
+    
+    def create_resize_command(self, old_points, new_points):
+        """Create and execute a resize command through the main window"""
+        try:
+            # Get the main window
+            main_window = self.parent().window()
+            if hasattr(main_window, 'undo_manager') and self.selected_shape_index is not None:
+                from libs.undo.commands.shape_movement_commands import ResizeShapeCommand
+                resize_cmd = ResizeShapeCommand(
+                    main_window.file_path,
+                    self.selected_shape_index,
+                    old_points,
+                    new_points
+                )
+                main_window.undo_manager.execute_command(resize_cmd)
+                print(f"[DEBUG] Resize command executed for shape at index {self.selected_shape_index}")
+        except Exception as e:
+            print(f"[DEBUG] Error creating resize command: {e}")
