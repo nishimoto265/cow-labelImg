@@ -376,7 +376,7 @@ class MainWindow(QMainWindow, WindowMixin):
         undo = action('Undo', self.undo_action,
                      'Ctrl+Z', 'undo', 'Undo last action')
         redo = action('Redo', self.redo_action,
-                     'Ctrl+Shift+Z', 'redo', 'Redo last action')
+                     'Ctrl+Y', 'redo', 'Redo last action')
 
         verify = action(get_str('verifyImg'), self.verify_image,
                         'space', 'verify', get_str('verifyImgDetail'))
@@ -1244,72 +1244,97 @@ class MainWindow(QMainWindow, WindowMixin):
             print(f"[DEBUG] new_shape: Adding shape with label '{text}'")
             
             self.prev_label_text = text
+            generate_color = generate_color_by_text(text)
             
-            # Get the shape that was just drawn (last shape in canvas)
-            if self.canvas.shapes:
-                # The shape already exists in canvas.shapes, we need to capture its data
-                # before we proceed with the command pattern
-                last_shape = self.canvas.shapes[-1]
+            # Set the label for the last shape that was just drawn
+            shape = self.canvas.set_last_label(text, generate_color, generate_color)
+            
+            # Create shape data for the command
+            shape_data = {
+                'label': text,
+                'points': [(p.x(), p.y()) for p in shape.points],
+                'difficult': shape.difficult if hasattr(shape, 'difficult') else False,
+                'line_color': generate_color,
+                'fill_color': generate_color
+            }
+            
+            # Add to label list UI
+            self.add_label(shape)
+            
+            # Create and execute AddShapeCommand for undo/redo tracking
+            from libs.undo.commands.shape_commands import AddShapeCommand
+            from libs.undo.commands.composite_command import CompositeCommand
+            
+            # Note: The shape is already in the canvas, but we need to track it for undo
+            # So we'll store the index for proper removal on undo
+            shape_index = len(self.canvas.shapes) - 1
+            
+            # Create a custom command that just tracks the already-added shape
+            class TrackAddedShapeCommand(AddShapeCommand):
+                def __init__(self, frame_path, shape_data, shape_index):
+                    super().__init__(frame_path, shape_data)
+                    self.shape_index = shape_index
+                    self.executed = True  # Mark as already executed
                 
-                # Create shape data from the drawn shape
-                shape_data = {
-                    'label': text,
-                    'points': [(p.x(), p.y()) for p in last_shape.points],
-                    'difficult': last_shape.difficult if hasattr(last_shape, 'difficult') else False
-                }
+                def execute(self, app):
+                    # Shape is already added, just return success
+                    return True
                 
-                # Set color
-                generate_color = generate_color_by_text(text)
-                shape_data['line_color'] = generate_color
-                shape_data['fill_color'] = generate_color
-                
-                # Remove the shape from canvas temporarily (will be re-added by command)
-                self.canvas.shapes.pop()
-                
-                # Create and execute AddShapeCommand
-                from libs.undo.commands.shape_commands import AddShapeCommand
-                from libs.undo.commands.composite_command import CompositeCommand
-                
-                if self.bb_duplication_mode:
-                    # Create composite command for BB duplication
-                    commands = []
-                    
-                    # First add the shape to current frame
-                    add_cmd = AddShapeCommand(self.file_path, shape_data)
-                    commands.append(add_cmd)
-                    
-                    # Then duplicate to subsequent frames
-                    num_frames = self.bb_dup_frame_count.value()
-                    current_idx = self.cur_img_idx
-                    
-                    for i in range(1, num_frames + 1):
-                        target_idx = current_idx + i
-                        if target_idx >= self.img_count:
-                            break
+                def undo(self, app):
+                    # Remove the shape that was added
+                    try:
+                        if app.file_path != self.frame_path:
+                            app.load_file(self.frame_path, preserve_zoom=True)
                         
-                        target_file = self.m_img_list[target_idx]
-                        dup_cmd = AddShapeCommand(target_file, shape_data)
-                        commands.append(dup_cmd)
-                    
-                    # Execute composite command
-                    composite_cmd = CompositeCommand(
-                        commands, 
-                        f"Add shape with BB duplication to {len(commands)-1} frames"
-                    )
-                    self.undo_manager.execute_command(composite_cmd)
-                else:
-                    # Just add the shape normally
-                    add_cmd = AddShapeCommand(self.file_path, shape_data)
-                    self.undo_manager.execute_command(add_cmd)
-                
-                if self.beginner():  # Switch to edit mode.
-                    self.canvas.set_editing(True)
-                    self.actions.create.setEnabled(True)
-                else:
-                    self.actions.editMode.setEnabled(True)
-                
-                if text not in self.label_hist:
-                    self.label_hist.append(text)
+                        if self.shape_index < len(app.canvas.shapes):
+                            shape = app.canvas.shapes[self.shape_index]
+                            
+                            # Remove from label list
+                            if hasattr(app, 'remove_label'):
+                                app.remove_label(shape)
+                            
+                            # Remove from canvas
+                            app.canvas.shapes.pop(self.shape_index)
+                            
+                            # Update canvas
+                            if hasattr(app.canvas, 'load_shapes'):
+                                app.canvas.load_shapes(app.canvas.shapes)
+                            elif hasattr(app.canvas, 'update'):
+                                app.canvas.update()
+                            
+                            # Mark as dirty
+                            app.set_dirty()
+                            
+                            # Auto-save if enabled
+                            if hasattr(app, 'auto_saving') and app.auto_saving.isChecked():
+                                app.save_file()
+                        
+                        self.executed = False
+                        return True
+                    except Exception as e:
+                        print(f"[DEBUG] Error undoing shape: {e}")
+                        return False
+            
+            # Track the shape addition for undo
+            track_cmd = TrackAddedShapeCommand(self.file_path, shape_data, shape_index)
+            print(f"[DEBUG] Tracking shape addition for undo/redo")
+            self.undo_manager.execute_command(track_cmd)
+            print(f"[DEBUG] UndoManager state: {self.undo_manager}")
+            
+            if self.beginner():  # Switch to edit mode.
+                self.canvas.set_editing(True)
+                self.actions.create.setEnabled(True)
+            else:
+                self.actions.editMode.setEnabled(True)
+            
+            self.set_dirty()
+            
+            if text not in self.label_hist:
+                self.label_hist.append(text)
+            
+            # Apply BB duplication if enabled
+            if self.bb_duplication_mode:
+                self.duplicate_bb_to_subsequent_frames(shape)
         else:
             self.canvas.reset_all_lines()
 
@@ -2102,19 +2127,32 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def undo_action(self):
         """Undo the last action"""
+        print("[DEBUG] undo_action called")
+        print(f"[DEBUG] Can undo: {self.undo_manager.can_undo()}")
+        print(f"[DEBUG] History: {self.undo_manager.get_history_info()}")
+        
         if self.undo_manager.undo():
+            print("[DEBUG] Undo successful")
             self.canvas.load_shapes(self.canvas.shapes)
             self.canvas.repaint()
             self.statusBar().showMessage('Undo successful', 2000)
+        else:
+            print("[DEBUG] Undo failed or nothing to undo")
         else:
             self.statusBar().showMessage('Nothing to undo', 2000)
     
     def redo_action(self):
         """Redo the last undone action"""
+        print("[DEBUG] redo_action called")
+        print(f"[DEBUG] Can redo: {self.undo_manager.can_redo()}")
+        
         if self.undo_manager.redo():
+            print("[DEBUG] Redo successful")
             self.canvas.load_shapes(self.canvas.shapes)
             self.canvas.repaint()
             self.statusBar().showMessage('Redo successful', 2000)
+        else:
+            print("[DEBUG] Redo failed or nothing to redo")
         else:
             self.statusBar().showMessage('Nothing to redo', 2000)
     
