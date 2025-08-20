@@ -1379,6 +1379,11 @@ class MainWindow(QMainWindow, WindowMixin):
             
             self.set_dirty()
             
+            # Save current frame if auto-saving is enabled
+            if self.auto_saving.isChecked() and self.default_save_dir:
+                print(f"[DEBUG] Auto-saving current frame before BB duplication")
+                self.save_file()
+            
             if text not in self.label_hist:
                 self.label_hist.append(text)
             
@@ -1417,8 +1422,18 @@ class MainWindow(QMainWindow, WindowMixin):
                         dup_commands,
                         f"BB duplication to {len(dup_commands)} frames"
                     )
+                    
+                    # Remember current frame
+                    current_file = self.file_path
+                    
+                    # Execute the duplication commands
                     self.undo_manager.execute_command(composite_cmd)
                     print(f"[DEBUG] BB duplication: Added {len(dup_commands)} shapes to subsequent frames")
+                    
+                    # Return to original frame if it was changed
+                    if self.file_path != current_file:
+                        print(f"[DEBUG] Returning to original frame after BB duplication")
+                        self.load_file(current_file, preserve_zoom=True)
         else:
             self.canvas.reset_all_lines()
 
