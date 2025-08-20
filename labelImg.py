@@ -378,6 +378,9 @@ class MainWindow(QMainWindow, WindowMixin):
         redo = action('Redo', self.redo_action,
                      'Ctrl+Y', 'redo', 'Redo last action')
         
+        # Add alternative shortcuts for redo
+        redo.setShortcuts(['Ctrl+Y', 'Ctrl+Shift+Z', 'Ctrl+R'])
+        
         # Explicitly add shortcuts
         undo.setShortcutContext(Qt.ApplicationShortcut)
         redo.setShortcutContext(Qt.ApplicationShortcut)
@@ -753,15 +756,21 @@ class MainWindow(QMainWindow, WindowMixin):
             # デバッグ：Ctrlキーと組み合わせのキーを表示
             if event.modifiers() & Qt.ControlModifier:
                 print(f"[DEBUG] Key pressed with Ctrl: key={event.key()}, text='{event.text()}', modifiers={event.modifiers()}")
+                # Qt.Key_Y = 89, Qt.Key_Z = 90
+                print(f"[DEBUG] Qt.Key_Y={Qt.Key_Y}, Qt.Key_Z={Qt.Key_Z}")
             
-            # Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z の処理
+            # Ctrl+Z / Ctrl+Y / Ctrl+R / Ctrl+Shift+Z の処理
             if event.modifiers() == Qt.ControlModifier:
-                if event.key() == Qt.Key_Z:
+                if event.key() == Qt.Key_Z or event.key() == 90:
                     print("[DEBUG] Ctrl+Z pressed in eventFilter")
                     self.undo_action()
                     return True
-                elif event.key() == Qt.Key_Y:
+                elif event.key() == Qt.Key_Y or event.key() == 89:
                     print("[DEBUG] Ctrl+Y pressed in eventFilter")
+                    self.redo_action()
+                    return True
+                elif event.key() == Qt.Key_R or event.key() == 82:
+                    print("[DEBUG] Ctrl+R pressed in eventFilter (alternative redo)")
                     self.redo_action()
                     return True
             elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
