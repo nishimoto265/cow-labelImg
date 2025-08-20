@@ -2138,7 +2138,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.statusBar().showMessage('Undo successful', 2000)
         else:
             print("[DEBUG] Undo failed or nothing to undo")
-        else:
             self.statusBar().showMessage('Nothing to undo', 2000)
     
     def redo_action(self):
@@ -2153,7 +2152,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.statusBar().showMessage('Redo successful', 2000)
         else:
             print("[DEBUG] Redo failed or nothing to redo")
-        else:
             self.statusBar().showMessage('Nothing to redo', 2000)
     
     def toggle_draw_square(self):
