@@ -2,17 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 Continuous tracking module for labelImg.
-Implements IOU-based tracking with Hungarian algorithm for optimal matching.
+Provides IOU calculation utilities for shape matching.
 """
-
-import numpy as np
-from scipy.optimize import linear_sum_assignment
 
 
 class Tracker:
     """
     Tracker class for continuous object tracking between frames.
-    Uses IOU (Intersection over Union) and Hungarian algorithm for matching.
+    Provides IOU (Intersection over Union) calculation for shape matching.
     """
     
     def __init__(self, iou_threshold=0.4):
@@ -23,7 +20,6 @@ class Tracker:
             iou_threshold (float): Minimum IOU value to consider a match (default: 0.4)
         """
         self.iou_threshold = iou_threshold
-        self.next_track_id = 1
         self.prev_frame_shapes = []
     
     def calculate_iou(self, shape1, shape2):
@@ -84,105 +80,18 @@ class Tracker:
         
         return (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
     
-    def create_cost_matrix(self, prev_shapes, curr_shapes):
+    def reset(self):
         """
-        Create cost matrix for Hungarian algorithm based on IOU.
-        
-        Args:
-            prev_shapes: List of shapes from previous frame
-            curr_shapes: List of shapes from current frame
-            
-        Returns:
-            numpy.ndarray: Cost matrix where cost = 1 - IOU
+        Reset the tracker state.
         """
-        n_prev = len(prev_shapes)
-        n_curr = len(curr_shapes)
-        cost_matrix = np.ones((n_prev, n_curr))
-        
-        for i, prev_shape in enumerate(prev_shapes):
-            for j, curr_shape in enumerate(curr_shapes):
-                iou = self.calculate_iou(prev_shape, curr_shape)
-                cost_matrix[i, j] = 1 - iou  # Higher IOU = lower cost
-        
-        return cost_matrix
+        self.prev_frame_shapes = []
     
     def track_shapes(self, prev_shapes, curr_shapes):
         """
-        Track shapes from previous frame to current frame.
+        Store shapes for tracking reference.
         
         Args:
             prev_shapes: List of shapes from previous frame
             curr_shapes: List of shapes from current frame
-            
-        Returns:
-            None (modifies curr_shapes in place)
         """
-        # Initialize attributes if not exist
-        for shape in curr_shapes:
-            if not hasattr(shape, 'track_id'):
-                shape.track_id = None
-            if not hasattr(shape, 'is_tracked'):
-                shape.is_tracked = False
-        
-        for shape in prev_shapes:
-            if not hasattr(shape, 'track_id'):
-                shape.track_id = None
-        
-        if not prev_shapes:
-            # First frame: assign new IDs to all shapes
-            for shape in curr_shapes:
-                shape.track_id = self.next_track_id
-                self.next_track_id += 1
-                shape.is_tracked = False
-            return
-        
-        if not curr_shapes:
-            # No shapes in current frame
-            return
-        
-        # Create cost matrix and find optimal matching
-        cost_matrix = self.create_cost_matrix(prev_shapes, curr_shapes)
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        
-        # Track matched shapes
-        matched_curr_indices = set()
-        
-        for i, j in zip(row_ind, col_ind):
-            iou = 1 - cost_matrix[i, j]
-            if iou >= self.iou_threshold:
-                # Successful match: inherit track_id and label
-                curr_shapes[j].track_id = prev_shapes[i].track_id
-                curr_shapes[j].label = prev_shapes[i].label
-                curr_shapes[j].is_tracked = True
-                # Update line color based on new label
-                if hasattr(prev_shapes[i], 'line_color'):
-                    curr_shapes[j].line_color = prev_shapes[i].line_color
-                matched_curr_indices.add(j)
-        
-        # Assign new IDs to unmatched shapes
-        for j, shape in enumerate(curr_shapes):
-            if j not in matched_curr_indices:
-                shape.track_id = self.next_track_id
-                self.next_track_id += 1
-                shape.is_tracked = False
-    
-    def reset(self):
-        """Reset the tracker state."""
-        self.next_track_id = 1
-        self.prev_frame_shapes = []
-    
-    def update_prev_shapes(self, shapes):
-        """
-        Update the previous frame shapes for next tracking.
-        
-        Args:
-            shapes: List of current frame shapes
-        """
-        # Create deep copies to avoid reference issues
-        self.prev_frame_shapes = []
-        for shape in shapes:
-            if hasattr(shape, 'copy'):
-                self.prev_frame_shapes.append(shape.copy())
-            else:
-                # Fallback if shape doesn't have copy method
-                self.prev_frame_shapes.append(shape)
+        self.prev_frame_shapes = curr_shapes

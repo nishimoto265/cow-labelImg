@@ -5,7 +5,16 @@
       "Bash(uv venv:*)",
       "Bash(powershell:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "mcp__serena__search_for_pattern",
+      "Bash(pip install:*)",
+      "Bash(grep:*)",
+      "mcp__serena__create_text_file",
+      "mcp__serena__list_dir",
+      "Bash(dir:*)",
+      "mcp__serena__replace_regex",
+      "Bash(rm:*)",
+      "Bash(sed:*)"
     ],
     "deny": []
   }

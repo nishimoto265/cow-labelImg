@@ -814,7 +814,7 @@ class Canvas(QWidget):
             # Get the main window
             main_window = self.parent().window()
             if hasattr(main_window, 'undo_manager') and self.selected_shape_index is not None:
-                from libs.undo.commands.shape_movement_commands import MoveShapeCommand
+                from libs.undo.commands.shape_commands import MoveShapeCommand
                 move_cmd = MoveShapeCommand(
                     main_window.file_path,
                     self.selected_shape_index,
@@ -832,7 +832,7 @@ class Canvas(QWidget):
             # Get the main window
             main_window = self.parent().window()
             if hasattr(main_window, 'undo_manager') and self.selected_shape_index is not None:
-                from libs.undo.commands.shape_movement_commands import ResizeShapeCommand
+                from libs.undo.commands.shape_commands import ResizeShapeCommand
                 resize_cmd = ResizeShapeCommand(
                     main_window.file_path,
                     self.selected_shape_index,

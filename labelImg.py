@@ -141,7 +141,6 @@ class MainWindow(QMainWindow, WindowMixin):
         # Initialize Undo/Redo Manager
         from libs.undo.manager import UndoManager
         self.undo_manager = UndoManager(self, max_history=100)
-        print("[DEBUG] Undo/Redo manager initialized")
         
         # Initialize Quick ID Selector
         self.quick_id_selector = QuickIDSelector(parent=self, max_ids=30)
@@ -152,7 +151,6 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Install event filter to catch keyboard shortcuts globally
         self.installEventFilter(self)
-        print("[DEBUG] Event filter installed for global keyboard shortcuts")
         
         # Also create QShortcut objects as a fallback
         from PyQt5.QtWidgets import QShortcut
@@ -319,7 +317,6 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Install event filter on canvas too
         self.canvas.installEventFilter(self)
-        print("[DEBUG] Event filter installed on canvas")
         self.canvas.lightRequest.connect(self.light_request)
         self.canvas.set_drawing_shape_to_square(settings.get(SETTING_DRAW_SQUARE, False))
 
@@ -752,19 +749,16 @@ class MainWindow(QMainWindow, WindowMixin):
         if event.type() == event.KeyPress:
             # デバッグ：Ctrlキーと組み合わせのキーを表示
             if event.modifiers() & Qt.ControlModifier:
-                print(f"[DEBUG] Key pressed with Ctrl: key={event.key()}, text='{event.text()}', modifiers={event.modifiers()}")
                 # Qt.Key_Y = 89, Qt.Key_Z = 90
-                print(f"[DEBUG] Qt.Key_Y={Qt.Key_Y}, Qt.Key_Z={Qt.Key_Z}")
+                pass
             
             # Ctrl+Z / Ctrl+Shift+Z の処理
             if event.modifiers() == Qt.ControlModifier:
                 if event.key() == Qt.Key_Z or event.key() == 90:
-                    print("[DEBUG] Ctrl+Z pressed in eventFilter")
                     self.undo_action()
                     return True
             elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
                 if event.key() == Qt.Key_Z:
-                    print("[DEBUG] Ctrl+Shift+Z pressed in eventFilter")
                     self.redo_action()
                     return True
             
@@ -1021,7 +1015,6 @@ class MainWindow(QMainWindow, WindowMixin):
         old_label = item.text()
         text = self.label_dialog.pop_up(old_label)
         if text is not None and text != old_label:
-            print(f"[DEBUG] edit_label: Changing label from '{old_label}' to '{text}'")
             # Get shape index
             shape_index = self.canvas.shapes.index(shape) if shape in self.canvas.shapes else -1
             if shape_index >= 0:
@@ -1029,10 +1022,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 from libs.undo.commands.label_commands import ChangeLabelCommand
                 change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, text)
                 result = self.undo_manager.execute_command(change_cmd)
-                print(f"[DEBUG] ChangeLabelCommand executed: {result}")
-                print(f"[DEBUG] UndoManager state: {self.undo_manager}")
             else:
-                print(f"[DEBUG] Shape not found in canvas.shapes")
+                pass
 
     # Tzutalin 20160906 : Add file list and dock to move faster
     def file_item_double_clicked(self, item=None):
@@ -1056,8 +1047,8 @@ class MainWindow(QMainWindow, WindowMixin):
 
         try:
             shape = self.items_to_shapes[item]
-        except:
-            pass
+        except KeyError:
+            return
         # Checked and Update
         try:
             if difficult != shape.difficult:
@@ -1065,8 +1056,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.set_dirty()
             else:  # User probably changed item visibility
                 self.canvas.set_shape_visible(shape, item.checkState() == Qt.Checked)
-        except:
-            pass
+        except AttributeError as e:
+            print(f"[DEBUG] Error updating item state: {e}")
 
     # React to canvas signals.
     def shape_selection_changed(self, selected=False):
@@ -1268,7 +1259,6 @@ class MainWindow(QMainWindow, WindowMixin):
         # Add Chris
         self.diffc_button.setChecked(False)
         if text is not None:
-            print(f"[DEBUG] new_shape: Adding shape with label '{text}'")
             
             self.prev_label_text = text
             generate_color = generate_color_by_text(text)
@@ -1292,7 +1282,6 @@ class MainWindow(QMainWindow, WindowMixin):
             # If BB duplication mode is enabled, remove the shape temporarily
             # (it will be re-added through the command with IOU checking)
             if self.bb_duplication_mode:
-                print("[DEBUG] BB duplication mode: Removing shape for IOU check on current frame")
                 # Remove from canvas
                 self.canvas.shapes.pop()
                 # Don't add to label list yet
@@ -1318,7 +1307,6 @@ class MainWindow(QMainWindow, WindowMixin):
                 def undo(self, app):
                     # Remove the shape that was added
                     try:
-                        print(f"[DEBUG] TrackAddedShapeCommand.undo: Removing shape at index {self.shape_index}")
                         if app.file_path != self.frame_path:
                             app.load_file(self.frame_path, preserve_zoom=True)
                         
@@ -1348,34 +1336,26 @@ class MainWindow(QMainWindow, WindowMixin):
                         self.executed = False
                         return True
                     except Exception as e:
-                        print(f"[DEBUG] Error undoing shape: {e}")
                         return False
                 
                 def redo(self, app):
                     # Re-add the shape
                     try:
-                        print(f"[DEBUG] TrackAddedShapeCommand.redo called")
-                        print(f"[DEBUG] TrackAddedShapeCommand.redo: Re-adding shape '{self.shape_data['label']}'")
-                        print(f"[DEBUG] Canvas shapes before redo execute: {len(app.canvas.shapes)}")
                         
                         # Call parent's execute to add the shape properly
                         result = super().execute(app)
                         
-                        print(f"[DEBUG] Canvas shapes after redo execute: {len(app.canvas.shapes)}")
-                        print(f"[DEBUG] Redo execute result: {result}")
                         
                         if result:
                             self.executed = True
                         return result
                     except Exception as e:
-                        print(f"[DEBUG] Error redoing shape: {e}")
                         import traceback
                         traceback.print_exc()
                         return False
             
             # Apply BB duplication if enabled
             if self.bb_duplication_mode:
-                print("[DEBUG] BB duplication mode: Creating composite command with IOU check")
                 
                 # Create progress dialog
                 from PyQt5.QtWidgets import QProgressDialog, QApplication
@@ -1455,7 +1435,6 @@ class MainWindow(QMainWindow, WindowMixin):
                 
                 # Save current frame if auto-saving is enabled
                 if self.auto_saving.isChecked() and self.default_save_dir:
-                    print(f"[DEBUG] Auto-saving current frame before BB duplication")
                     self.save_file()
                 
                 # Execute all commands as a composite (including current frame)
@@ -1467,7 +1446,6 @@ class MainWindow(QMainWindow, WindowMixin):
                 
                 # Execute the duplication commands
                 self.undo_manager.execute_command(composite_cmd)
-                print(f"[DEBUG] BB duplication: Processing {len(dup_commands)} frames (including current)")
                 
                 # Show completion message
                 if len(dup_commands) > 1:
@@ -1481,9 +1459,7 @@ class MainWindow(QMainWindow, WindowMixin):
             else:
                 # Normal mode - just track the shape addition for undo
                 track_cmd = TrackAddedShapeCommand(self.file_path, shape_data, shape_index)
-                print(f"[DEBUG] Tracking shape addition for undo/redo")
                 self.undo_manager.execute_command(track_cmd)
-                print(f"[DEBUG] UndoManager state: {self.undo_manager}")
             
             if self.beginner():  # Switch to edit mode.
                 self.canvas.set_editing(True)
@@ -2287,12 +2263,8 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def undo_action(self):
         """Undo the last action"""
-        print("[DEBUG] undo_action called")
-        print(f"[DEBUG] Can undo: {self.undo_manager.can_undo()}")
-        print(f"[DEBUG] History: {self.undo_manager.get_history_info()}")
         
         if self.undo_manager.undo():
-            print("[DEBUG] Undo successful")
             self.canvas.load_shapes(self.canvas.shapes)
             self.canvas.repaint()
             
@@ -2305,20 +2277,12 @@ class MainWindow(QMainWindow, WindowMixin):
             
             self.statusBar().showMessage('Undo successful', 2000)
         else:
-            print("[DEBUG] Undo failed or nothing to undo")
             self.statusBar().showMessage('Nothing to undo', 2000)
     
     def redo_action(self):
         """Redo the last undone action"""
-        print("[DEBUG] redo_action called")
-        print(f"[DEBUG] Can redo: {self.undo_manager.can_redo()}")
-        print(f"[DEBUG] History before redo: {self.undo_manager.get_history_info()}")
-        print(f"[DEBUG] Canvas shapes before redo: {len(self.canvas.shapes)} shapes")
         
         if self.undo_manager.redo():
-            print("[DEBUG] Redo successful")
-            print(f"[DEBUG] Canvas shapes after redo: {len(self.canvas.shapes)} shapes")
-            print(f"[DEBUG] History after redo: {self.undo_manager.get_history_info()}")
             
             # Reload shapes and update UI
             self.canvas.load_shapes(self.canvas.shapes)
@@ -2336,7 +2300,6 @@ class MainWindow(QMainWindow, WindowMixin):
             
             self.statusBar().showMessage('Redo successful', 2000)
         else:
-            print("[DEBUG] Redo failed or nothing to redo")
             self.statusBar().showMessage('Nothing to redo', 2000)
     
     def toggle_draw_square(self):
@@ -2611,20 +2574,17 @@ class MainWindow(QMainWindow, WindowMixin):
                 if img.load(image_path):
                     # YoloReader expects the QImage object, not the shape
                     yolo_reader = YoloReader(annotation_path, img)
-                    print(f"[DEBUG] Successfully loaded YOLO annotation with image: {image_path}")
                 else:
                     # If image can't be loaded, skip
                     print(f"[Warning] Could not load image for YOLO annotation: {image_path}")
                     return shapes
                     
                 shapes_data = yolo_reader.get_shapes()
-                print(f"[DEBUG] YOLO reader returned {len(shapes_data)} shapes")
             else:
                 # Pascal VOC XML format
                 from libs.pascal_voc_io import PascalVocReader
                 tVocParseReader = PascalVocReader(annotation_path)
                 shapes_data = tVocParseReader.get_shapes()
-                print(f"[DEBUG] Pascal VOC reader returned {len(shapes_data)} shapes")
             
             for label, points, line_color, fill_color, difficult in shapes_data:
                 shape = {
@@ -2635,7 +2595,6 @@ class MainWindow(QMainWindow, WindowMixin):
                     'fill_color': fill_color
                 }
                 shapes.append(shape)
-                print(f"[DEBUG] Added shape: label='{label}', points={len(points)}")
         except Exception as e:
             print(f"Error loading annotation file {annotation_path}: {e}")
         
@@ -2813,7 +2772,6 @@ class MainWindow(QMainWindow, WindowMixin):
         
         shape_index = self.canvas.shapes.index(shape) if shape in self.canvas.shapes else -1
         if shape_index < 0:
-            print(f"[DEBUG] Shape not found in canvas.shapes")
             self._applying_label = False
             return
         
@@ -2944,22 +2902,16 @@ class MainWindow(QMainWindow, WindowMixin):
                     f"Propagate label change '{old_label}' to '{new_label}' ({len(change_commands)} frames)"
                 )
                 result = self.undo_manager.execute_command(composite_cmd)
-                print(f"[DEBUG] Continuous tracking: Changed {len(change_commands)} frames, result: {result}")
             else:
                 # Just single frame
                 result = self.undo_manager.execute_command(change_commands[0])
-                print(f"[DEBUG] Single frame change executed: {result}")
             
-            print(f"[DEBUG] UndoManager state: {self.undo_manager}")
         else:
             # Normal single-frame operation - use Command pattern
-            print(f"[DEBUG] apply_label_to_selected_shape: Changing label from '{old_label}' to '{new_label}'")
             
             # Create and execute ChangeLabelCommand
             change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label)
             result = self.undo_manager.execute_command(change_cmd)
-            print(f"[DEBUG] ChangeLabelCommand executed from click: {result}")
-            print(f"[DEBUG] UndoManager state: {self.undo_manager}")
         
         # Reset flag
         self._applying_label = False
