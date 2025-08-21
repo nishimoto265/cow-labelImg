@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ChangeLabelCommand(Command):
     """Command to change a shape's label"""
     
-    def __init__(self, frame_path: str, shape_index: int, old_label: str, new_label: str):
+    def __init__(self, frame_path: str, shape_index: int, old_label: str, new_label: str, direct_file_edit: bool = False):
         """
         Initialize ChangeLabelCommand
         
@@ -25,12 +25,14 @@ class ChangeLabelCommand(Command):
             shape_index: Index of the shape in the shapes list
             old_label: Original label
             new_label: New label to apply
+            direct_file_edit: If True, edit annotation file directly without loading frame
         """
         super().__init__()
         self.frame_path = frame_path
         self.shape_index = shape_index
         self.old_label = old_label
         self.new_label = new_label
+        self.direct_file_edit = direct_file_edit
     
     def execute(self, app: Any) -> bool:
         """
@@ -43,49 +45,148 @@ class ChangeLabelCommand(Command):
             bool: True if successful, False otherwise
         """
         try:
-            # Load target frame if different
-            if app.file_path != self.frame_path:
-                app.load_file(self.frame_path, preserve_zoom=True)
-            
-            # Change label
-            if self.shape_index < len(app.canvas.shapes):
-                shape = app.canvas.shapes[self.shape_index]
-                shape.label = self.new_label
+            if self.direct_file_edit:
+                # Edit annotation file directly without loading frame
+                return self._edit_annotation_file(app, self.new_label)
+            else:
+                # Original behavior - load frame and change in UI
+                # Load target frame if different
+                if app.file_path != self.frame_path:
+                    app.load_file(self.frame_path, preserve_zoom=True)
                 
-                # Update list item if exists
-                if hasattr(app, 'shapes_to_items') and shape in app.shapes_to_items:
-                    item = app.shapes_to_items[shape]
-                    item.setText(self.new_label)
+                # Change label
+                if self.shape_index < len(app.canvas.shapes):
+                    shape = app.canvas.shapes[self.shape_index]
+                    shape.label = self.new_label
                     
-                    # Update background color based on label
-                    try:
-                        from libs.utils import generate_color_by_text
-                        item.setBackground(generate_color_by_text(self.new_label))
-                        shape.line_color = generate_color_by_text(self.new_label)
-                        shape.fill_color = generate_color_by_text(self.new_label)
-                    except ImportError:
-                        pass
+                    # Update list item if exists
+                    if hasattr(app, 'shapes_to_items') and shape in app.shapes_to_items:
+                        item = app.shapes_to_items[shape]
+                        item.setText(self.new_label)
+                        
+                        # Update background color based on label
+                        try:
+                            from libs.utils import generate_color_by_text
+                            item.setBackground(generate_color_by_text(self.new_label))
+                            shape.line_color = generate_color_by_text(self.new_label)
+                            shape.fill_color = generate_color_by_text(self.new_label)
+                        except ImportError:
+                            pass
+                
+                # Update combo box
+                if hasattr(app, 'update_combo_box'):
+                    app.update_combo_box()
+                
+                # Update canvas
+                if hasattr(app.canvas, 'update'):
+                    app.canvas.update()
+                
+                # Mark as dirty
+                app.set_dirty()
+                
+                # Auto-save if enabled
+                if hasattr(app, 'auto_saving') and app.auto_saving.isChecked():
+                    app.save_file()
+                
+                self.executed = True
+                return True
             
-            # Update combo box
-            if hasattr(app, 'update_combo_box'):
-                app.update_combo_box()
+        except Exception as e:
+            logger.error(f"Error executing ChangeLabelCommand: {e}")
+            return False
+    
+    def _edit_annotation_file(self, app: Any, label: str) -> bool:
+        """Edit annotation file directly"""
+        try:
+            import os
             
-            # Update canvas
-            if hasattr(app.canvas, 'update'):
-                app.canvas.update()
+            # Get annotation path
+            annotation_path = app.get_annotation_path(self.frame_path)
+            if not os.path.exists(annotation_path):
+                logger.debug(f"Annotation file not found: {annotation_path}")
+                return False
             
-            # Mark as dirty
-            app.set_dirty()
+            # Check format
+            if annotation_path.endswith('.txt'):
+                # YOLO format
+                from libs.yolo_io import YoloReader, YOLOWriter
+                from PyQt5.QtGui import QImage
+                
+                # Get image
+                img = QImage()
+                if not img.load(self.frame_path):
+                    logger.error(f"Could not load image: {self.frame_path}")
+                    return False
+                
+                # Read existing annotations
+                reader = YoloReader(annotation_path, img)
+                shapes = reader.get_shapes()
+                
+                # Check if shape index is valid
+                if self.shape_index >= len(shapes):
+                    logger.debug(f"Shape index {self.shape_index} out of range")
+                    return False
+                
+                # Update the label
+                old_shape = shapes[self.shape_index]
+                new_shape = (label, old_shape[1], old_shape[2], old_shape[3], old_shape[4])
+                shapes[self.shape_index] = new_shape
+                
+                # Write back to file using YOLOWriter
+                img_folder = os.path.dirname(self.frame_path)
+                img_name = os.path.basename(self.frame_path)
+                img_size = [img.height(), img.width(), 3 if img.hasAlphaChannel() else 1]
+                
+                writer = YOLOWriter(img_folder, img_name, img_size)
+                writer.verified = True
+                
+                # Add shapes to writer
+                for shape_label, points, _, _, difficult in shapes:
+                    # Convert points to bounding box for YOLO format
+                    if len(points) >= 4:
+                        x_min = min(p[0] for p in points)
+                        y_min = min(p[1] for p in points)
+                        x_max = max(p[0] for p in points)
+                        y_max = max(p[1] for p in points)
+                        writer.add_bnd_box(x_min, y_min, x_max, y_max, shape_label, difficult)
+                
+                # Save with the class list
+                writer.save(app.label_hist if hasattr(app, 'label_hist') else [], annotation_path)
+            else:
+                # Pascal VOC XML format
+                from libs.pascal_voc_io import PascalVocReader, PascalVocWriter
+                
+                # Read existing annotations
+                reader = PascalVocReader(annotation_path)
+                shapes = reader.get_shapes()
+                
+                # Check if shape index is valid
+                if self.shape_index >= len(shapes):
+                    logger.debug(f"Shape index {self.shape_index} out of range")
+                    return False
+                
+                # Update the label
+                old_shape = shapes[self.shape_index]
+                new_shape = (label, old_shape[1], old_shape[2], old_shape[3], old_shape[4])
+                shapes[self.shape_index] = new_shape
+                
+                # Write back to file
+                img_folder = os.path.dirname(self.frame_path)
+                img_name = os.path.basename(self.frame_path)
+                img_size = reader.img_size if hasattr(reader, 'img_size') else [0, 0, 3]
+                
+                writer = PascalVocWriter(img_folder, img_name, img_size, database="Unknown")
+                for shape_label, points, line_color, fill_color, difficult in shapes:
+                    writer.add_bnd_box(points[0][0], points[0][1], points[2][0], points[2][1], 
+                                     shape_label, difficult)
+                writer.save(annotation_path)
             
-            # Auto-save if enabled
-            if hasattr(app, 'auto_saving') and app.auto_saving.isChecked():
-                app.save_file()
-            
+            logger.debug(f"Changed label in {annotation_path}: {self.old_label} -> {label}")
             self.executed = True
             return True
             
         except Exception as e:
-            logger.error(f"Error executing ChangeLabelCommand: {e}")
+            logger.error(f"Error editing annotation file: {e}")
             return False
     
     def undo(self, app: Any) -> bool:
@@ -99,46 +200,51 @@ class ChangeLabelCommand(Command):
             bool: True if successful, False otherwise
         """
         try:
-            # Load target frame if different
-            if app.file_path != self.frame_path:
-                app.load_file(self.frame_path, preserve_zoom=True)
-            
-            # Restore original label
-            if self.shape_index < len(app.canvas.shapes):
-                shape = app.canvas.shapes[self.shape_index]
-                shape.label = self.old_label
+            if self.direct_file_edit:
+                # Edit annotation file directly without loading frame
+                return self._edit_annotation_file(app, self.old_label)
+            else:
+                # Original behavior - load frame and change in UI
+                # Load target frame if different
+                if app.file_path != self.frame_path:
+                    app.load_file(self.frame_path, preserve_zoom=True)
                 
-                # Update list item if exists
-                if hasattr(app, 'shapes_to_items') and shape in app.shapes_to_items:
-                    item = app.shapes_to_items[shape]
-                    item.setText(self.old_label)
+                # Restore original label
+                if self.shape_index < len(app.canvas.shapes):
+                    shape = app.canvas.shapes[self.shape_index]
+                    shape.label = self.old_label
                     
-                    # Update background color based on label
-                    try:
-                        from libs.utils import generate_color_by_text
-                        item.setBackground(generate_color_by_text(self.old_label))
-                        shape.line_color = generate_color_by_text(self.old_label)
-                        shape.fill_color = generate_color_by_text(self.old_label)
-                    except ImportError:
-                        pass
-            
-            # Update combo box
-            if hasattr(app, 'update_combo_box'):
-                app.update_combo_box()
-            
-            # Update canvas
-            if hasattr(app.canvas, 'update'):
-                app.canvas.update()
-            
-            # Mark as dirty
-            app.set_dirty()
-            
-            # Auto-save if enabled
-            if hasattr(app, 'auto_saving') and app.auto_saving.isChecked():
-                app.save_file()
-            
-            self.executed = False
-            return True
+                    # Update list item if exists
+                    if hasattr(app, 'shapes_to_items') and shape in app.shapes_to_items:
+                        item = app.shapes_to_items[shape]
+                        item.setText(self.old_label)
+                        
+                        # Update background color based on label
+                        try:
+                            from libs.utils import generate_color_by_text
+                            item.setBackground(generate_color_by_text(self.old_label))
+                            shape.line_color = generate_color_by_text(self.old_label)
+                            shape.fill_color = generate_color_by_text(self.old_label)
+                        except ImportError:
+                            pass
+                
+                # Update combo box
+                if hasattr(app, 'update_combo_box'):
+                    app.update_combo_box()
+                
+                # Update canvas
+                if hasattr(app.canvas, 'update'):
+                    app.canvas.update()
+                
+                # Mark as dirty
+                app.set_dirty()
+                
+                # Auto-save if enabled
+                if hasattr(app, 'auto_saving') and app.auto_saving.isChecked():
+                    app.save_file()
+                
+                self.executed = False
+                return True
             
         except Exception as e:
             logger.error(f"Error undoing ChangeLabelCommand: {e}")

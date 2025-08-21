@@ -1285,16 +1285,24 @@ class MainWindow(QMainWindow, WindowMixin):
                 'fill_color': generate_color
             }
             
-            # Add to label list UI
-            self.add_label(shape)
-            
             # Create and execute AddShapeCommand for undo/redo tracking
             from libs.undo.commands.shape_commands import AddShapeCommand
             from libs.undo.commands.composite_command import CompositeCommand
             
-            # Note: The shape is already in the canvas, but we need to track it for undo
-            # So we'll store the index for proper removal on undo
-            shape_index = len(self.canvas.shapes) - 1
+            # If BB duplication mode is enabled, remove the shape temporarily
+            # (it will be re-added through the command with IOU checking)
+            if self.bb_duplication_mode:
+                print("[DEBUG] BB duplication mode: Removing shape for IOU check on current frame")
+                # Remove from canvas
+                self.canvas.shapes.pop()
+                # Don't add to label list yet
+                # The shape index after removal
+                shape_index = len(self.canvas.shapes)
+            else:
+                # Normal mode - add to label list UI
+                self.add_label(shape)
+                # The shape index (it's the last one added)
+                shape_index = len(self.canvas.shapes) - 1
             
             # Create a custom command that just tracks the already-added shape
             class TrackAddedShapeCommand(AddShapeCommand):
@@ -1365,11 +1373,117 @@ class MainWindow(QMainWindow, WindowMixin):
                         traceback.print_exc()
                         return False
             
-            # Track the shape addition for undo
-            track_cmd = TrackAddedShapeCommand(self.file_path, shape_data, shape_index)
-            print(f"[DEBUG] Tracking shape addition for undo/redo")
-            self.undo_manager.execute_command(track_cmd)
-            print(f"[DEBUG] UndoManager state: {self.undo_manager}")
+            # Apply BB duplication if enabled
+            if self.bb_duplication_mode:
+                print("[DEBUG] BB duplication mode: Creating composite command with IOU check")
+                
+                # Create progress dialog
+                from PyQt5.QtWidgets import QProgressDialog, QApplication
+                from PyQt5.QtCore import QTimer
+                
+                # Get number of frames to duplicate to
+                num_frames = self.bb_dup_frame_count.value()
+                current_idx = self.cur_img_idx
+                
+                progress = QProgressDialog("BB複製処理中...", "キャンセル", 0, num_frames + 1, self)
+                progress.setWindowTitle("処理中")
+                progress.setWindowModality(Qt.WindowModal)
+                progress.setMinimumDuration(0)
+                progress.show()
+                
+                # Get IOU settings
+                iou_threshold = self.bb_dup_iou_threshold.value()
+                overwrite_mode = self.bb_dup_overwrite_checkbox.isChecked()
+                
+                # Create list to store all duplication commands
+                dup_commands = []
+                
+                # Track frame range
+                start_frame = current_idx + 1
+                end_frame = current_idx
+                
+                # First, add the command for the current frame with IOU checking
+                from libs.undo.commands.bb_duplication_commands import AddShapeWithIOUCheckCommand
+                
+                progress.setValue(0)
+                progress.setLabelText(f"フレーム {current_idx + 1}/{self.img_count} を処理中...")
+                QApplication.processEvents()
+                
+                # Use AddShapeWithIOUCheckCommand for the current frame too
+                current_cmd = AddShapeWithIOUCheckCommand(
+                    self.file_path,
+                    shape_data,
+                    iou_threshold=iou_threshold,
+                    overwrite_mode=overwrite_mode
+                )
+                dup_commands.append(current_cmd)
+                
+                # Add commands for each subsequent frame
+                for i in range(1, num_frames + 1):
+                    if progress.wasCanceled():
+                        break
+                        
+                    target_idx = current_idx + i
+                    if target_idx >= self.img_count:
+                        break
+                    
+                    progress.setValue(i)
+                    progress.setLabelText(f"フレーム {target_idx + 1}/{self.img_count} を処理中...")
+                    QApplication.processEvents()
+                    
+                    target_file = self.m_img_list[target_idx]
+                    # Create shape data for duplication
+                    dup_shape_data = {
+                        'label': shape.label,
+                        'points': [(p.x(), p.y()) for p in shape.points],
+                        'difficult': shape.difficult if hasattr(shape, 'difficult') else False,
+                        'line_color': shape.line_color,
+                        'fill_color': shape.fill_color
+                    }
+                    
+                    # Use AddShapeWithIOUCheckCommand for IOU checking
+                    dup_cmd = AddShapeWithIOUCheckCommand(
+                        target_file, 
+                        dup_shape_data,
+                        iou_threshold=iou_threshold,
+                        overwrite_mode=overwrite_mode
+                    )
+                    dup_commands.append(dup_cmd)
+                    end_frame = target_idx
+                
+                progress.close()
+                
+                # Save current frame if auto-saving is enabled
+                if self.auto_saving.isChecked() and self.default_save_dir:
+                    print(f"[DEBUG] Auto-saving current frame before BB duplication")
+                    self.save_file()
+                
+                # Execute all commands as a composite (including current frame)
+                from libs.undo.commands.composite_command import CompositeCommand
+                composite_cmd = CompositeCommand(
+                    dup_commands,
+                    f"BB duplication to {len(dup_commands)} frames (including current)"
+                )
+                
+                # Execute the duplication commands
+                self.undo_manager.execute_command(composite_cmd)
+                print(f"[DEBUG] BB duplication: Processing {len(dup_commands)} frames (including current)")
+                
+                # Show completion message
+                if len(dup_commands) > 1:
+                    completion_msg = f"フレーム {current_idx + 1}〜{end_frame + 1} まで処理完了"
+                    completion_dialog = QProgressDialog(completion_msg, None, 0, 100, self)
+                    completion_dialog.setWindowTitle("完了")
+                    completion_dialog.setWindowModality(Qt.WindowModal)
+                    completion_dialog.setValue(100)
+                    completion_dialog.show()
+                    QTimer.singleShot(1000, completion_dialog.close)
+            else:
+                # Normal mode - just track the shape addition for undo
+                track_cmd = TrackAddedShapeCommand(self.file_path, shape_data, shape_index)
+                print(f"[DEBUG] Tracking shape addition for undo/redo")
+                self.undo_manager.execute_command(track_cmd)
+                print(f"[DEBUG] UndoManager state: {self.undo_manager}")
             
             if self.beginner():  # Switch to edit mode.
                 self.canvas.set_editing(True)
@@ -1379,61 +1493,8 @@ class MainWindow(QMainWindow, WindowMixin):
             
             self.set_dirty()
             
-            # Save current frame if auto-saving is enabled
-            if self.auto_saving.isChecked() and self.default_save_dir:
-                print(f"[DEBUG] Auto-saving current frame before BB duplication")
-                self.save_file()
-            
             if text not in self.label_hist:
                 self.label_hist.append(text)
-            
-            # Apply BB duplication if enabled
-            if self.bb_duplication_mode:
-                print("[DEBUG] BB duplication mode: Creating composite command")
-                # Get number of frames to duplicate to
-                num_frames = self.bb_dup_frame_count.value()
-                current_idx = self.cur_img_idx
-                
-                # Create list to store all duplication commands
-                dup_commands = []
-                
-                # Add commands for each subsequent frame
-                for i in range(1, num_frames + 1):
-                    target_idx = current_idx + i
-                    if target_idx >= self.img_count:
-                        break
-                    
-                    target_file = self.m_img_list[target_idx]
-                    # Create AddShapeCommand for this frame
-                    dup_shape_data = {
-                        'label': shape.label,
-                        'points': [(p.x(), p.y()) for p in shape.points],
-                        'difficult': shape.difficult if hasattr(shape, 'difficult') else False,
-                        'line_color': shape.line_color,
-                        'fill_color': shape.fill_color
-                    }
-                    dup_cmd = AddShapeCommand(target_file, dup_shape_data)
-                    dup_commands.append(dup_cmd)
-                
-                # If we have duplication commands, execute them as a composite
-                if dup_commands:
-                    from libs.undo.commands.composite_command import CompositeCommand
-                    composite_cmd = CompositeCommand(
-                        dup_commands,
-                        f"BB duplication to {len(dup_commands)} frames"
-                    )
-                    
-                    # Remember current frame
-                    current_file = self.file_path
-                    
-                    # Execute the duplication commands
-                    self.undo_manager.execute_command(composite_cmd)
-                    print(f"[DEBUG] BB duplication: Added {len(dup_commands)} shapes to subsequent frames")
-                    
-                    # Return to original frame if it was changed
-                    if self.file_path != current_file:
-                        print(f"[DEBUG] Returning to original frame after BB duplication")
-                        self.load_file(current_file, preserve_zoom=True)
         else:
             self.canvas.reset_all_lines()
 
@@ -2465,10 +2526,11 @@ class MainWindow(QMainWindow, WindowMixin):
     def calculate_iou(self, box1, box2):
         """Calculate Intersection over Union between two bounding boxes."""
         # Get coordinates from all points to find bounding box
-        x1_coords = [p.x() for p in box1]
-        y1_coords = [p.y() for p in box1]
-        x2_coords = [p.x() for p in box2]
-        y2_coords = [p.y() for p in box2]
+        # Handle both QPointF objects and tuples/lists
+        x1_coords = [p[0] if isinstance(p, (list, tuple)) else p.x() for p in box1]
+        y1_coords = [p[1] if isinstance(p, (list, tuple)) else p.y() for p in box1]
+        x2_coords = [p[0] if isinstance(p, (list, tuple)) else p.x() for p in box2]
+        y2_coords = [p[1] if isinstance(p, (list, tuple)) else p.y() for p in box2]
         
         x1_min, x1_max = min(x1_coords), max(x1_coords)
         y1_min, y1_max = min(y1_coords), max(y1_coords)
@@ -2495,6 +2557,89 @@ class MainWindow(QMainWindow, WindowMixin):
             return 0.0
         
         return inter_area / union_area
+    
+    def get_annotation_path(self, image_path):
+        """Get annotation file path for given image path."""
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        
+        # Check format and use appropriate extension
+        if self.label_file_format == LabelFileFormat.YOLO:
+            ext = TXT_EXT
+        else:
+            ext = XML_EXT
+            
+        if self.default_save_dir and self.default_save_dir != image_path:
+            return os.path.join(self.default_save_dir, base_name + ext)
+        else:
+            return os.path.splitext(image_path)[0] + ext
+    
+    def load_shapes_from_annotation_file(self, annotation_path, image_path=None):
+        """Load shapes from annotation file without changing current view.
+        
+        Args:
+            annotation_path: Path to annotation file
+            image_path: Optional path to corresponding image file
+        """
+        shapes = []
+        try:
+            import os
+            # Check file extension to determine format
+            if annotation_path.endswith('.txt'):
+                # YOLO format
+                from libs.yolo_io import YoloReader
+                # Need image for YOLO format
+                if not image_path:
+                    # Get from m_img_list
+                    base_name = os.path.basename(annotation_path).replace('.txt', '')
+                    
+                    # Find the corresponding image in m_img_list
+                    if hasattr(self, 'm_img_list'):
+                        for img_file in self.m_img_list:
+                            if base_name in img_file:
+                                image_path = img_file
+                                break
+                    
+                    if not image_path:
+                        # Try default locations
+                        image_path = os.path.splitext(annotation_path)[0] + '.png'
+                        if not os.path.exists(image_path):
+                            image_path = os.path.splitext(annotation_path)[0] + '.jpg'
+                
+                # Get image
+                from PyQt5.QtGui import QImage
+                img = QImage()
+                if img.load(image_path):
+                    # YoloReader expects the QImage object, not the shape
+                    yolo_reader = YoloReader(annotation_path, img)
+                    print(f"[DEBUG] Successfully loaded YOLO annotation with image: {image_path}")
+                else:
+                    # If image can't be loaded, skip
+                    print(f"[Warning] Could not load image for YOLO annotation: {image_path}")
+                    return shapes
+                    
+                shapes_data = yolo_reader.get_shapes()
+                print(f"[DEBUG] YOLO reader returned {len(shapes_data)} shapes")
+            else:
+                # Pascal VOC XML format
+                from libs.pascal_voc_io import PascalVocReader
+                tVocParseReader = PascalVocReader(annotation_path)
+                shapes_data = tVocParseReader.get_shapes()
+                print(f"[DEBUG] Pascal VOC reader returned {len(shapes_data)} shapes")
+            
+            for label, points, line_color, fill_color, difficult in shapes_data:
+                shape = {
+                    'label': label,
+                    'points': points,
+                    'difficult': difficult,
+                    'line_color': line_color,
+                    'fill_color': fill_color
+                }
+                shapes.append(shape)
+                print(f"[DEBUG] Added shape: label='{label}', points={len(points)}")
+        except Exception as e:
+            print(f"Error loading annotation file {annotation_path}: {e}")
+        
+        return shapes
     
     def duplicate_bb_to_subsequent_frames(self, source_shape):
         """Duplicate bounding box to subsequent frames."""
@@ -2672,41 +2817,125 @@ class MainWindow(QMainWindow, WindowMixin):
             self._applying_label = False
             return
         
-        # If continuous tracking mode is ON, use multi-frame operation
+        # If continuous tracking mode is ON, propagate label using IOU tracking
         if self.continuous_tracking_mode:
-            print(f"[ClickChange] Starting continuous label change: {old_label} -> {new_label}")
+            print(f"[ContinuousTracking] Starting IOU-based label propagation: '{old_label}' -> '{new_label}'")
+            
+            # Create progress dialog
+            from PyQt5.QtWidgets import QProgressDialog, QApplication
+            from PyQt5.QtCore import QTimer
+            
+            # Get current frame info
+            current_file = self.file_path
+            current_idx = self.cur_img_idx
+            
+            num_frames = min(self.img_count - current_idx - 1, 100)  # Limit to 100 frames
+            progress = QProgressDialog("連続ID変更処理中...", "キャンセル", 0, num_frames, self)
+            progress.setWindowTitle("処理中")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
             
             # Create list of commands for all frames to update
             change_commands = []
             
-            # First, change the current frame
-            change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label)
+            # First, change the current frame (don't use direct_file_edit for current frame)
+            change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label, direct_file_edit=False)
             change_commands.append(change_cmd)
+            print(f"[ContinuousTracking] Changed current frame {current_idx}: '{old_label}' -> '{new_label}'")
+            
+            # Get current shape's points for IOU matching
+            current_shape_points = [(p.x(), p.y()) for p in shape.points]
             
             # Find and prepare commands for subsequent frames with matching shapes
-            current_file = self.file_path
-            current_idx = self.cur_img_idx
+            prev_shape_points = current_shape_points
             
             # Track through subsequent frames
-            for i in range(1, self.img_count - current_idx):
+            frames_processed = 0
+            start_frame = current_idx + 1
+            end_frame = current_idx
+            
+            for i in range(1, num_frames + 1):
+                if progress.wasCanceled():
+                    break
+                    
                 target_idx = current_idx + i
                 if target_idx >= self.img_count:
                     break
                 
+                progress.setValue(i)
+                progress.setLabelText(f"フレーム {target_idx + 1}/{self.img_count} を処理中...")
+                QApplication.processEvents()
+                
                 target_file = self.m_img_list[target_idx]
                 
-                # We need to check if there's a matching shape in the target frame
-                # For now, we'll create commands for all potential matches
-                # The actual matching logic will be handled during execution
-                
-                # Note: This is a simplified approach. 
-                # Ideally, we'd check for IOU match before creating the command
-                change_cmd = ChangeLabelCommand(target_file, shape_index, old_label, new_label)
-                change_commands.append(change_cmd)
-                
-                # Limit propagation to reasonable number of frames
-                if len(change_commands) >= 10:  # Arbitrary limit
+                # Load target frame's annotation without changing current view
+                import os
+                annotation_path = self.get_annotation_path(target_file)
+                print(f"[ContinuousTracking] Checking frame {target_idx}: {annotation_path}")
+                if annotation_path and os.path.exists(annotation_path):
+                    # Load shapes from annotation file directly, pass the image path
+                    shapes_in_target = self.load_shapes_from_annotation_file(annotation_path, target_file)
+                    print(f"[ContinuousTracking] Found {len(shapes_in_target)} shapes in frame {target_idx}")
+                    
+                    # Find best matching shape using IOU (regardless of current label)
+                    best_match_idx = -1
+                    best_iou = 0.0
+                    best_match_label = None
+                    
+                    for idx, target_shape_data in enumerate(shapes_in_target):
+                        target_points = target_shape_data.get('points', [])
+                        shape_label = target_shape_data.get('label')
+                        
+                        # Calculate IOU regardless of label
+                        if len(target_points) == 4 and len(prev_shape_points) == 4:
+                            iou = self.calculate_iou(prev_shape_points, target_points)
+                            print(f"[ContinuousTracking] Shape {idx} (label='{shape_label}'): IOU={iou:.3f}")
+                            
+                            # Use IOU threshold of 0.4 as per specification
+                            if iou > best_iou and iou >= 0.4:
+                                best_iou = iou
+                                best_match_idx = idx
+                                best_match_label = shape_label
+                    
+                    if best_match_idx >= 0:
+                        # Check if we hit the target label (stop condition)
+                        if best_match_label == new_label:
+                            print(f"[ContinuousTracking] Found shape with target label '{new_label}' at frame {target_idx}, stopping")
+                            break
+                        
+                        # Found matching shape, change its label to new_label
+                        print(f"[ContinuousTracking] Tracking successful at frame {target_idx}")
+                        print(f"[ContinuousTracking]   - Shape {best_match_idx}: '{best_match_label}' -> '{new_label}' (IOU={best_iou:.3f})")
+                        
+                        # Create change command (change whatever label it has to new_label)
+                        change_cmd = ChangeLabelCommand(target_file, best_match_idx, best_match_label, new_label, direct_file_edit=True)
+                        change_commands.append(change_cmd)
+                        
+                        # Update tracking for next frame
+                        prev_shape_points = shapes_in_target[best_match_idx].get('points', [])
+                        end_frame = target_idx
+                        frames_processed += 1
+                    else:
+                        # No matching shape found (IOU < 0.4), stop propagation
+                        print(f"[ContinuousTracking] No matching shape found in frame {target_idx} (IOU < 0.4), stopping")
+                        break
+                else:
+                    # No annotation file, stop propagation
+                    print(f"[ContinuousTracking] No annotation found in frame {target_idx}, stopping")
                     break
+            
+            progress.close()
+            
+            # Show completion message
+            if frames_processed > 0:
+                completion_msg = f"フレーム {start_frame}～{end_frame + 1} まで処理完了"
+                completion_dialog = QProgressDialog(completion_msg, None, 0, 100, self)
+                completion_dialog.setWindowTitle("完了")
+                completion_dialog.setWindowModality(Qt.WindowModal)
+                completion_dialog.setValue(100)
+                completion_dialog.show()
+                QTimer.singleShot(1000, completion_dialog.close)
             
             # Execute as composite command
             if len(change_commands) > 1:
@@ -2715,7 +2944,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     f"Propagate label change '{old_label}' to '{new_label}' ({len(change_commands)} frames)"
                 )
                 result = self.undo_manager.execute_command(composite_cmd)
-                print(f"[DEBUG] Continuous tracking composite command executed: {result}")
+                print(f"[DEBUG] Continuous tracking: Changed {len(change_commands)} frames, result: {result}")
             else:
                 # Just single frame
                 result = self.undo_manager.execute_command(change_commands[0])
