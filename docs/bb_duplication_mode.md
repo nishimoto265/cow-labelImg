@@ -22,7 +22,6 @@ BB Duplication Mode（BB複製モード）は、新規作成したBounding Box�
 - 現在のフレームを含めて処理（IOU判定あり）
 - 進行度表示（QProgressDialog）
 - キャンセル可能
-- 処理完了後に範囲表示（1秒間）
 
 ## 使用方法
 

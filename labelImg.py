@@ -1359,7 +1359,6 @@ class MainWindow(QMainWindow, WindowMixin):
                 
                 # Create progress dialog
                 from PyQt5.QtWidgets import QProgressDialog, QApplication
-                from PyQt5.QtCore import QTimer
                 
                 # Get number of frames to duplicate to
                 num_frames = self.bb_dup_frame_count.value()
@@ -1447,15 +1446,6 @@ class MainWindow(QMainWindow, WindowMixin):
                 # Execute the duplication commands
                 self.undo_manager.execute_command(composite_cmd)
                 
-                # Show completion message
-                if len(dup_commands) > 1:
-                    completion_msg = f"フレーム {current_idx + 1}〜{end_frame + 1} まで処理完了"
-                    completion_dialog = QProgressDialog(completion_msg, None, 0, 100, self)
-                    completion_dialog.setWindowTitle("完了")
-                    completion_dialog.setWindowModality(Qt.WindowModal)
-                    completion_dialog.setValue(100)
-                    completion_dialog.show()
-                    QTimer.singleShot(1000, completion_dialog.close)
             else:
                 # Normal mode - just track the shape addition for undo
                 track_cmd = TrackAddedShapeCommand(self.file_path, shape_data, shape_index)
@@ -2781,7 +2771,6 @@ class MainWindow(QMainWindow, WindowMixin):
             
             # Create progress dialog
             from PyQt5.QtWidgets import QProgressDialog, QApplication
-            from PyQt5.QtCore import QTimer
             
             # Get current frame info
             current_file = self.file_path
@@ -2885,15 +2874,6 @@ class MainWindow(QMainWindow, WindowMixin):
             
             progress.close()
             
-            # Show completion message
-            if frames_processed > 0:
-                completion_msg = f"フレーム {start_frame}～{end_frame + 1} まで処理完了"
-                completion_dialog = QProgressDialog(completion_msg, None, 0, 100, self)
-                completion_dialog.setWindowTitle("完了")
-                completion_dialog.setWindowModality(Qt.WindowModal)
-                completion_dialog.setValue(100)
-                completion_dialog.show()
-                QTimer.singleShot(1000, completion_dialog.close)
             
             # Execute as composite command
             if len(change_commands) > 1:
