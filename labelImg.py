@@ -121,6 +121,17 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Main widgets and related state.
         self.label_dialog = LabelDialog(parent=self, list_item=self.label_hist)
+        
+        # Dual label support
+        from libs.dualLabelDialog import DualLabelDialog
+        self.dual_label_dialog = DualLabelDialog(parent=self, list_item1=self.label_hist, list_item2=self.label_hist)
+        self.label1_hist = []  # History for label 1
+        self.label2_hist = []  # History for label 2
+        self.current_label1 = ""
+        self.current_label2 = ""
+        self.change_label1_enabled = True  # チェックボックスの状態
+        self.change_label2_enabled = False  # チェックボックスの状態
+        self.dual_label_mode = True  # デュアルラベルモードを有効化
 
         self.items_to_shapes = {}
         self.shapes_to_items = {}
@@ -192,6 +203,24 @@ class MainWindow(QMainWindow, WindowMixin):
         self.click_change_label_checkbox.setChecked(False)
         self.click_change_label_checkbox.stateChanged.connect(self.toggle_click_change_label)
         list_layout.addWidget(self.click_change_label_checkbox)
+        
+        # Dual label change checkboxes
+        dual_label_container = QWidget()
+        dual_label_layout = QVBoxLayout()
+        dual_label_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+        
+        self.change_label1_checkbox = QCheckBox("Label 1 を変更")
+        self.change_label1_checkbox.setChecked(True)
+        self.change_label1_checkbox.stateChanged.connect(self.on_change_label1_toggled)
+        
+        self.change_label2_checkbox = QCheckBox("Label 2 を変更")
+        self.change_label2_checkbox.setChecked(False)
+        self.change_label2_checkbox.stateChanged.connect(self.on_change_label2_toggled)
+        
+        dual_label_layout.addWidget(self.change_label1_checkbox)
+        dual_label_layout.addWidget(self.change_label2_checkbox)
+        dual_label_container.setLayout(dual_label_layout)
+        list_layout.addWidget(dual_label_container)
         
         # Create BB duplication feature container
         bb_dup_container = QWidget()
@@ -1081,10 +1110,26 @@ class MainWindow(QMainWindow, WindowMixin):
         shape.paint_label = self.display_label_option.isChecked()
         shape.paint_id = self.draw_id_checkbox.isChecked()
         
-        item = HashableQListWidgetItem(shape.label)
+        # Create label text for display
+        text_parts = []
+        if hasattr(shape, 'label1') and shape.label1:
+            text_parts.append(shape.label1)
+        elif shape.label:
+            text_parts.append(shape.label)
+        
+        if hasattr(shape, 'label2') and shape.label2:
+            text_parts.append(shape.label2)
+        
+        display_text = " | ".join(text_parts) if len(text_parts) > 1 else (text_parts[0] if text_parts else "")
+        
+        item = HashableQListWidgetItem(display_text)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked)
-        item.setBackground(generate_color_by_text(shape.label))
+        
+        # Use label1 for color generation
+        color_label = shape.label1 if hasattr(shape, 'label1') else shape.label
+        item.setBackground(generate_color_by_text(color_label))
+        
         self.items_to_shapes[item] = shape
         self.shapes_to_items[shape] = item
         self.label_list.addItem(item)
@@ -1108,8 +1153,24 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def load_labels(self, shapes):
         s = []
-        for label, points, line_color, fill_color, difficult in shapes:
-            shape = Shape(label=label)
+        for shape_data in shapes:
+            # Handle both old format (tuple) and new format (dict with label2)
+            if isinstance(shape_data, (list, tuple)):
+                # Old format: (label, points, line_color, fill_color, difficult)
+                label, points, line_color, fill_color, difficult = shape_data
+                label2 = ""
+            elif isinstance(shape_data, dict):
+                # New format with label2
+                label = shape_data.get('label', '')
+                label2 = shape_data.get('label2', '')
+                points = shape_data.get('points', [])
+                line_color = shape_data.get('line_color')
+                fill_color = shape_data.get('fill_color')
+                difficult = shape_data.get('difficult', False)
+            else:
+                continue
+            
+            shape = Shape(label=label, label2=label2)
             for x, y in points:
 
                 # Ensure the labels are within the bounds of the image. If not, fix them.
@@ -1242,33 +1303,60 @@ class MainWindow(QMainWindow, WindowMixin):
 
         position MUST be in global coordinates.
         """
-        if not self.use_default_label_checkbox.isChecked():
-            if len(self.label_hist) > 0:
-                self.label_dialog = LabelDialog(
-                    parent=self, list_item=self.label_hist)
-
-            # Sync single class mode from PR#106
-            if self.single_class_mode.isChecked() and self.lastLabel:
-                text = self.lastLabel
+        label1 = None
+        label2 = None
+        
+        if self.dual_label_mode:
+            # Dual label mode
+            if not self.use_default_label_checkbox.isChecked():
+                label1, label2 = self.dual_label_dialog.pop_up(
+                    label1=self.current_label1, 
+                    label2=self.current_label2
+                )
+                if label1 or label2:
+                    self.current_label1 = label1 if label1 else ""
+                    self.current_label2 = label2 if label2 else ""
+                    # 履歴に追加
+                    if label1 and label1 not in self.label1_hist:
+                        self.label1_hist.append(label1)
+                    if label2 and label2 not in self.label2_hist:
+                        self.label2_hist.append(label2)
             else:
-                text = self.label_dialog.pop_up(text=self.prev_label_text)
-                self.lastLabel = text
+                label1 = self.default_label
+                label2 = ""
+            text = label1  # For backward compatibility
         else:
-            text = self.default_label
+            # Single label mode (backward compatibility)
+            if not self.use_default_label_checkbox.isChecked():
+                if len(self.label_hist) > 0:
+                    self.label_dialog = LabelDialog(
+                        parent=self, list_item=self.label_hist)
+
+                # Sync single class mode from PR#106
+                if self.single_class_mode.isChecked() and self.lastLabel:
+                    text = self.lastLabel
+                else:
+                    text = self.label_dialog.pop_up(text=self.prev_label_text)
+                    self.lastLabel = text
+            else:
+                text = self.default_label
+            label1 = text
+            label2 = ""
 
         # Add Chris
         self.diffc_button.setChecked(False)
-        if text is not None:
+        if label1 is not None or label2 is not None:
             
-            self.prev_label_text = text
-            generate_color = generate_color_by_text(text)
+            self.prev_label_text = label1 if label1 else ""
+            generate_color = generate_color_by_text(label1 if label1 else "default")
             
             # Set the label for the last shape that was just drawn
-            shape = self.canvas.set_last_label(text, generate_color, generate_color)
+            shape = self.canvas.set_last_label(label1, generate_color, generate_color, label2=label2)
             
             # Create shape data for the command
             shape_data = {
-                'label': text,
+                'label': label1,
+                'label2': label2,
                 'points': [(p.x(), p.y()) for p in shape.points],
                 'difficult': shape.difficult if hasattr(shape, 'difficult') else False,
                 'line_color': generate_color,
@@ -2313,6 +2401,14 @@ class MainWindow(QMainWindow, WindowMixin):
         """Toggle click-to-change-label mode."""
         self.click_change_label_mode = (state == Qt.Checked)
     
+    def on_change_label1_toggled(self, state):
+        """Toggle label 1 change mode."""
+        self.change_label1_enabled = (state == Qt.Checked)
+    
+    def on_change_label2_toggled(self, state):
+        """Toggle label 2 change mode."""
+        self.change_label2_enabled = (state == Qt.Checked)
+    
     def toggle_bb_duplication(self, state):
         """Toggle BB duplication mode."""
         self.bb_duplication_mode = (state == Qt.Checked)
@@ -2738,26 +2834,60 @@ class MainWindow(QMainWindow, WindowMixin):
         # Set flag to prevent recursion
         self._applying_label = True
         
-        # Store the old label
-        old_label = shape.label
+        # Store the old labels
+        old_label1 = getattr(shape, 'label1', shape.label)
+        old_label2 = getattr(shape, 'label2', '')
         
-        # Determine the new label
-        new_label = None
-        if self.use_default_label_checkbox.isChecked() and self.default_label:
-            new_label = self.default_label
+        # Determine new labels based on checkboxes
+        new_label1 = old_label1
+        new_label2 = old_label2
+        
+        if self.dual_label_mode:
+            # In dual label mode, only change the labels that are checked
+            if self.change_label1_enabled or self.change_label2_enabled:
+                if self.use_default_label_checkbox.isChecked():
+                    # Use default labels
+                    if self.change_label1_enabled:
+                        new_label1 = self.default_label if self.default_label else old_label1
+                    if self.change_label2_enabled:
+                        new_label2 = self.current_label2 if self.current_label2 else old_label2
+                else:
+                    # Show dual label dialog
+                    input_label1 = old_label1 if not self.change_label1_enabled else self.current_label1
+                    input_label2 = old_label2 if not self.change_label2_enabled else self.current_label2
+                    result_label1, result_label2 = self.dual_label_dialog.pop_up(input_label1, input_label2)
+                    
+                    if result_label1 is not None or result_label2 is not None:
+                        if self.change_label1_enabled and result_label1 is not None:
+                            new_label1 = result_label1
+                            self.current_label1 = result_label1
+                        if self.change_label2_enabled and result_label2 is not None:
+                            new_label2 = result_label2
+                            self.current_label2 = result_label2
         else:
-            # Show label dialog
-            text = self.label_dialog.pop_up(item.text())
-            if text is not None:
-                new_label = text
+            # Single label mode (backward compatibility)
+            old_label = shape.label
+            new_label = None
+            if self.use_default_label_checkbox.isChecked() and self.default_label:
+                new_label = self.default_label
+            else:
+                # Show label dialog
+                text = self.label_dialog.pop_up(item.text())
+                if text is not None:
+                    new_label = text
+            
+            if new_label is not None and new_label != old_label:
+                new_label1 = new_label
+                old_label1 = old_label
         
-        # If label didn't change or was cancelled, return
-        if new_label is None or new_label == old_label:
+        # If labels didn't change or was cancelled, return
+        if new_label1 == old_label1 and new_label2 == old_label2:
             self._applying_label = False
             return
         
         # Create command based on tracking mode
         from libs.undo.commands.label_commands import ChangeLabelCommand
+        from libs.undo.commands.dual_label_commands import ChangeDualLabelCommand
         from libs.undo.commands.composite_command import CompositeCommand
         
         shape_index = self.canvas.shapes.index(shape) if shape in self.canvas.shapes else -1
@@ -2766,8 +2896,8 @@ class MainWindow(QMainWindow, WindowMixin):
             return
         
         # If continuous tracking mode is ON, propagate label using IOU tracking
-        if self.continuous_tracking_mode:
-            print(f"[ContinuousTracking] Starting IOU-based label propagation: '{old_label}' -> '{new_label}'")
+        if self.continuous_tracking_mode and not self.dual_label_mode:
+            print(f"[ContinuousTracking] Starting IOU-based label propagation: '{old_label1}' -> '{new_label1}'")
             
             # Create progress dialog
             from PyQt5.QtWidgets import QProgressDialog, QApplication
@@ -2889,8 +3019,19 @@ class MainWindow(QMainWindow, WindowMixin):
         else:
             # Normal single-frame operation - use Command pattern
             
-            # Create and execute ChangeLabelCommand
-            change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label)
+            if self.dual_label_mode:
+                # Create and execute ChangeDualLabelCommand
+                change_cmd = ChangeDualLabelCommand(
+                    self.file_path, shape_index,
+                    old_label1, new_label1,
+                    old_label2, new_label2,
+                    self.change_label1_enabled,
+                    self.change_label2_enabled
+                )
+            else:
+                # Create and execute ChangeLabelCommand (backward compatibility)
+                change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label1, new_label1)
+            
             result = self.undo_manager.execute_command(change_cmd)
         
         # Reset flag

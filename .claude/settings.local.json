@@ -14,7 +14,8 @@
       "Bash(dir:*)",
       "mcp__serena__replace_regex",
       "Bash(rm:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(where python)"
     ],
     "deny": []
   }

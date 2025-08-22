@@ -738,16 +738,25 @@ class Canvas(QWidget):
         points = [p1 + p2 for p1, p2 in zip(self.selected_shape.points, [step] * 4)]
         return True in map(self.out_of_pixmap, points)
 
-    def set_last_label(self, text, line_color=None, fill_color=None):
-        assert text
-        self.shapes[-1].label = text
-        if line_color:
-            self.shapes[-1].line_color = line_color
+    def set_last_label(self, text, line_color=None, fill_color=None, label2=None):
+        assert text or label2  # At least one label should be provided
+        if self.shapes:
+            # Set label1 (primary)
+            self.shapes[-1].label = text
+            self.shapes[-1].label1 = text
+            
+            # Set label2 (secondary)
+            if label2 is not None:
+                self.shapes[-1].label2 = label2
+            
+            if line_color:
+                self.shapes[-1].line_color = line_color
 
-        if fill_color:
-            self.shapes[-1].fill_color = fill_color
+            if fill_color:
+                self.shapes[-1].fill_color = fill_color
 
-        return self.shapes[-1]
+            return self.shapes[-1]
+        return None
 
     def undo_last_line(self):
         assert self.shapes

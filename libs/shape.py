@@ -38,14 +38,22 @@ class Shape(object):
     scale = 1.0
     label_font_size = 8
 
-    def __init__(self, label=None, line_color=None, difficult=False, paint_label=False):
-        self.label = label
+    def __init__(self, label=None, line_color=None, difficult=False, paint_label=False, label2=None):
+        # Dual label support
+        self.label1 = label  # Primary label
+        self.label2 = label2 if label2 is not None else ""  # Secondary label
+        self.label = label  # Keep for backward compatibility
+        
         self.points = []
         self.fill = False
         self.selected = False
         self.difficult = difficult
         self.paint_label = paint_label
         self.paint_id = True  # デフォルトでIDを描画
+        
+        # Display settings for dual labels
+        self.show_label1 = True
+        self.show_label2 = True
 
         self._highlight_index = None
         self._highlight_mode = self.NEAR_VERTEX
@@ -126,15 +134,14 @@ class Shape(object):
                     font.setBold(True)
                     painter.setFont(font)
                     
-                    # テキストを作成
+                    # テキストを作成 (Dual label support)
                     text_parts = []
-                    if self.paint_label and self.label:
-                        text_parts.append(str(self.label))
-                    if self.paint_id and self.label:
-                        # ラベルをそのまま表示
-                        text_parts.append(str(self.label))
+                    if self.show_label1 and self.label1:
+                        text_parts.append(str(self.label1))
+                    if self.show_label2 and self.label2:
+                        text_parts.append(str(self.label2))
                     
-                    text = " ".join(text_parts)
+                    text = " | ".join(text_parts) if len(text_parts) > 1 else " ".join(text_parts)
                     if text:
                         if min_y < min_y_label:
                             min_y += min_y_label
@@ -159,15 +166,14 @@ class Shape(object):
                 font.setBold(True)
                 painter.setFont(font)
                 
-                # テキストを作成
+                # テキストを作成 (Dual label support)
                 text_parts = []
-                if self.paint_label and self.label:
-                    text_parts.append(str(self.label))
-                if self.paint_id and self.label:
-                    # ラベルをそのまま表示
-                    text_parts.append(str(self.label))
+                if self.show_label1 and self.label1:
+                    text_parts.append(str(self.label1))
+                if self.show_label2 and self.label2:
+                    text_parts.append(str(self.label2))
                 
-                text = " ".join(text_parts)
+                text = " | ".join(text_parts) if len(text_parts) > 1 else " ".join(text_parts)
                 if text:
                     if min_y < min_y_label:
                         min_y += min_y_label
@@ -226,7 +232,7 @@ class Shape(object):
         self._highlight_index = None
 
     def copy(self):
-        shape = Shape("%s" % self.label)
+        shape = Shape(self.label1, label2=self.label2)
         shape.points = [p for p in self.points]
         shape.fill = self.fill
         shape.selected = self.selected
@@ -237,6 +243,8 @@ class Shape(object):
             shape.fill_color = self.fill_color
         shape.difficult = self.difficult
         shape.paint_id = getattr(self, 'paint_id', True)
+        shape.show_label1 = self.show_label1
+        shape.show_label2 = self.show_label2
         return shape
 
     def __len__(self):
