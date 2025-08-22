@@ -105,6 +105,7 @@ class AddShapeWithIOUCheckCommand(AddShapeCommand):
                             # Mark shape for removal
                             shapes_to_remove.append(existing_shape)
                             logger.debug(f"[BB Duplication] Overwriting existing BB (IOU={iou:.2f})")
+                            print(f"[DEBUG BB Duplication] Overwriting existing BB with label '{existing_shape.label}' (IOU={iou:.2f})")
                         else:
                             # Skip this frame if any overlap found
                             should_add_shape = False
@@ -178,6 +179,8 @@ class AddShapeWithIOUCheckCommand(AddShapeCommand):
                 super().undo(app)
             
             # Then restore any shapes that were removed
+            if self.removed_shapes:
+                print(f"[DEBUG BB Duplication] Restoring {len(self.removed_shapes)} removed shapes during undo")
             self.restore_removed_shapes(app)
             
             self.executed = False
@@ -185,6 +188,59 @@ class AddShapeWithIOUCheckCommand(AddShapeCommand):
             
         except Exception as e:
             logger.error(f"Error undoing shape addition with IOU check: {e}")
+            return False
+    
+    def redo(self, app: Any) -> bool:
+        """
+        Redo the shape addition with IOU checking
+        
+        Args:
+            app: MainWindow instance
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # If shape was skipped, nothing to redo
+            if self.skipped:
+                self.executed = False
+                return True
+            
+            # Load target frame if different
+            if app.file_path != self.frame_path:
+                app.load_file(self.frame_path, preserve_zoom=True)
+            
+            # First remove the shapes that were originally removed
+            if self.removed_shapes:
+                for shape_data in self.removed_shapes:
+                    # Find and remove matching shape
+                    for existing_shape in app.canvas.shapes[:]:  # Use slice to avoid modification during iteration
+                        if (hasattr(existing_shape, 'label') and existing_shape.label == shape_data.get('label', '') and
+                            len(existing_shape.points) == len(shape_data.get('points', []))):
+                            # Check if points match (approximately)
+                            existing_points = [(p.x(), p.y()) for p in existing_shape.points]
+                            shape_points = shape_data.get('points', [])
+                            if len(existing_points) == len(shape_points):
+                                match = True
+                                for i, (ep, sp) in enumerate(zip(existing_points, shape_points)):
+                                    if abs(ep[0] - sp[0]) > 1 or abs(ep[1] - sp[1]) > 1:
+                                        match = False
+                                        break
+                                
+                                if match:
+                                    # Remove from canvas
+                                    app.canvas.shapes.remove(existing_shape)
+                                    # Remove from label list
+                                    if hasattr(app, 'remove_label'):
+                                        app.remove_label(existing_shape)
+                                    break
+            
+            # Then add the new shape
+            result = super().execute(app)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error redoing shape addition with IOU check: {e}")
             return False
     
     def restore_removed_shapes(self, app: Any):
@@ -209,6 +265,12 @@ class AddShapeWithIOUCheckCommand(AddShapeCommand):
             app.canvas.shapes.append(shape)
             if hasattr(app, 'add_label'):
                 app.add_label(shape)
+        
+        # Update canvas
+        if hasattr(app.canvas, 'load_shapes'):
+            app.canvas.load_shapes(app.canvas.shapes)
+        elif hasattr(app.canvas, 'update'):
+            app.canvas.update()
     
     @property
     def description(self) -> str:
