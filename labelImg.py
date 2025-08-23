@@ -111,6 +111,10 @@ class MainWindow(QMainWindow, WindowMixin):
         self._beginner = True
         self.screencast = "https://youtu.be/p0nR2YsCY_U"
 
+        # Initialize label histories before loading predefined classes
+        self.label1_hist = []  # History for label 1
+        self.label2_hist = []  # History for label 2
+        
         # Load predefined classes to the list
         self.load_predefined_classes(default_prefdef_class_file)
 
@@ -124,11 +128,6 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Dual label support
         from libs.dualLabelDialog import DualLabelDialog
-        # Initialize label histories before loading predefined classes
-        if not hasattr(self, 'label1_hist'):
-            self.label1_hist = []  # History for label 1
-        if not hasattr(self, 'label2_hist'):
-            self.label2_hist = []  # History for label 2
         
         # Create dual label dialog with loaded histories
         self.dual_label_dialog = DualLabelDialog(parent=self, list_item1=self.label1_hist, list_item2=self.label2_hist)
@@ -174,26 +173,34 @@ class MainWindow(QMainWindow, WindowMixin):
 
         list_layout = QVBoxLayout()
         list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(2)  # Reduce spacing between items
 
-        # Create a widget for using default label
+        # Create a widget for using default label (now with dual label support)
         self.use_default_label_checkbox = QCheckBox(get_str('useDefaultLabel'))
         self.use_default_label_checkbox.setChecked(False)
+        
+        # Keep for backward compatibility
         self.default_label_combo_box = DefaultLabelComboBox(self,items=self.label_hist)
-
-        use_default_label_qhbox_layout = QHBoxLayout()
-        use_default_label_qhbox_layout.addWidget(self.use_default_label_checkbox)
-        use_default_label_qhbox_layout.addWidget(self.default_label_combo_box)
-        use_default_label_container = QWidget()
-        use_default_label_container.setLayout(use_default_label_qhbox_layout)
         
         # Dual label default settings
-        default_labels_container = QWidget()
+        default_labels_container = QGroupBox("指定したラベルを使う")
         default_labels_layout = QVBoxLayout()
-        default_labels_layout.setContentsMargins(0, 0, 0, 0)
+        default_labels_layout.setContentsMargins(10, 5, 10, 5)
+        default_labels_layout.setSpacing(2)  # Reduce spacing between label rows
+        
+        # Checkbox to enable default labels
+        use_default_layout = QHBoxLayout()
+        use_default_layout.setContentsMargins(0, 0, 0, 0)
+        self.use_default_dual_labels = QCheckBox("有効")
+        self.use_default_dual_labels.setChecked(False)
+        use_default_layout.addWidget(self.use_default_dual_labels)
+        use_default_layout.addStretch()
         
         # Default Label 1
         default_label1_layout = QHBoxLayout()
-        default_label1_label = QLabel("Default Label 1:")
+        default_label1_layout.setContentsMargins(0, 0, 0, 0)
+        default_label1_label = QLabel("Label 1:")
+        default_label1_label.setMinimumWidth(50)
         self.default_label1_combo_box = DefaultLabelComboBox(self, items=self.label1_hist)
         self.default_label1_combo_box.cb.currentTextChanged.connect(self.on_default_label1_changed)
         default_label1_layout.addWidget(default_label1_label)
@@ -201,12 +208,15 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Default Label 2
         default_label2_layout = QHBoxLayout()
-        default_label2_label = QLabel("Default Label 2:")
+        default_label2_layout.setContentsMargins(0, 0, 0, 0)
+        default_label2_label = QLabel("Label 2:")
+        default_label2_label.setMinimumWidth(50)
         self.default_label2_combo_box = DefaultLabelComboBox(self, items=self.label2_hist)
         self.default_label2_combo_box.cb.currentTextChanged.connect(self.on_default_label2_changed)
         default_label2_layout.addWidget(default_label2_label)
         default_label2_layout.addWidget(self.default_label2_combo_box)
         
+        default_labels_layout.addLayout(use_default_layout)
         default_labels_layout.addLayout(default_label1_layout)
         default_labels_layout.addLayout(default_label2_layout)
         default_labels_container.setLayout(default_labels_layout)
@@ -221,7 +231,6 @@ class MainWindow(QMainWindow, WindowMixin):
         # Add some of widgets to list_layout
         list_layout.addWidget(self.edit_button)
         list_layout.addWidget(self.diffc_button)
-        list_layout.addWidget(use_default_label_container)
         list_layout.addWidget(default_labels_container)
         
         # Create continuous tracking checkbox
@@ -1380,7 +1389,7 @@ class MainWindow(QMainWindow, WindowMixin):
         
         if self.dual_label_mode:
             # Dual label mode
-            if not self.use_default_label_checkbox.isChecked():
+            if not self.use_default_dual_labels.isChecked():
                 label1, label2 = self.dual_label_dialog.pop_up(
                     label1=self.current_label1, 
                     label2=self.current_label2
@@ -1394,8 +1403,9 @@ class MainWindow(QMainWindow, WindowMixin):
                     if label2 and label2 not in self.label2_hist:
                         self.label2_hist.append(label2)
             else:
-                label1 = self.default_label
-                label2 = ""
+                # Use default labels
+                label1 = self.current_label1 if self.current_label1 else (self.label1_hist[0] if self.label1_hist else "")
+                label2 = self.current_label2 if self.current_label2 else (self.label2_hist[0] if self.label2_hist else "")
             text = label1  # For backward compatibility
         else:
             # Single label mode (backward compatibility)
@@ -2991,10 +3001,10 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.dual_label_mode:
             # In dual label mode, only change the labels that are checked
             if self.change_label1_enabled or self.change_label2_enabled:
-                if self.use_default_label_checkbox.isChecked():
+                if self.use_default_dual_labels.isChecked():
                     # Use default labels
                     if self.change_label1_enabled:
-                        new_label1 = self.default_label if self.default_label else old_label1
+                        new_label1 = self.current_label1 if self.current_label1 else old_label1
                     if self.change_label2_enabled:
                         new_label2 = self.current_label2 if self.current_label2 else old_label2
                 else:
