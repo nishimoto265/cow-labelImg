@@ -124,11 +124,17 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Dual label support
         from libs.dualLabelDialog import DualLabelDialog
-        self.dual_label_dialog = DualLabelDialog(parent=self, list_item1=self.label_hist, list_item2=self.label_hist)
-        self.label1_hist = []  # History for label 1
-        self.label2_hist = []  # History for label 2
-        self.current_label1 = ""
-        self.current_label2 = ""
+        # Initialize label histories before loading predefined classes
+        if not hasattr(self, 'label1_hist'):
+            self.label1_hist = []  # History for label 1
+        if not hasattr(self, 'label2_hist'):
+            self.label2_hist = []  # History for label 2
+        
+        # Create dual label dialog with loaded histories
+        self.dual_label_dialog = DualLabelDialog(parent=self, list_item1=self.label1_hist, list_item2=self.label2_hist)
+        
+        self.current_label1 = self.label1_hist[0] if self.label1_hist else ""
+        self.current_label2 = self.label2_hist[0] if self.label2_hist else ""
         self.change_label1_enabled = True  # チェックボックスの状態
         self.change_label2_enabled = False  # チェックボックスの状態
         self.dual_label_mode = True  # デュアルラベルモードを有効化
@@ -179,6 +185,31 @@ class MainWindow(QMainWindow, WindowMixin):
         use_default_label_qhbox_layout.addWidget(self.default_label_combo_box)
         use_default_label_container = QWidget()
         use_default_label_container.setLayout(use_default_label_qhbox_layout)
+        
+        # Dual label default settings
+        default_labels_container = QWidget()
+        default_labels_layout = QVBoxLayout()
+        default_labels_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Default Label 1
+        default_label1_layout = QHBoxLayout()
+        default_label1_label = QLabel("Default Label 1:")
+        self.default_label1_combo_box = DefaultLabelComboBox(self, items=self.label1_hist)
+        self.default_label1_combo_box.cb.currentTextChanged.connect(self.on_default_label1_changed)
+        default_label1_layout.addWidget(default_label1_label)
+        default_label1_layout.addWidget(self.default_label1_combo_box)
+        
+        # Default Label 2
+        default_label2_layout = QHBoxLayout()
+        default_label2_label = QLabel("Default Label 2:")
+        self.default_label2_combo_box = DefaultLabelComboBox(self, items=self.label2_hist)
+        self.default_label2_combo_box.cb.currentTextChanged.connect(self.on_default_label2_changed)
+        default_label2_layout.addWidget(default_label2_label)
+        default_label2_layout.addWidget(self.default_label2_combo_box)
+        
+        default_labels_layout.addLayout(default_label1_layout)
+        default_labels_layout.addLayout(default_label2_layout)
+        default_labels_container.setLayout(default_labels_layout)
 
         # Create a widget for edit and diffc button
         self.diffc_button = QCheckBox(get_str('useDifficult'))
@@ -191,6 +222,7 @@ class MainWindow(QMainWindow, WindowMixin):
         list_layout.addWidget(self.edit_button)
         list_layout.addWidget(self.diffc_button)
         list_layout.addWidget(use_default_label_container)
+        list_layout.addWidget(default_labels_container)
         
         # Create continuous tracking checkbox
         self.continuous_tracking_checkbox = QCheckBox("連続ID付けモード")
@@ -221,6 +253,46 @@ class MainWindow(QMainWindow, WindowMixin):
         dual_label_layout.addWidget(self.change_label2_checkbox)
         dual_label_container.setLayout(dual_label_layout)
         list_layout.addWidget(dual_label_container)
+        
+        # Color mode selection for dual labels
+        color_mode_container = QGroupBox("BB色分けモード")
+        color_mode_layout = QVBoxLayout()
+        color_mode_layout.setContentsMargins(10, 5, 10, 5)
+        
+        self.color_mode_group = QButtonGroup()
+        self.color_mode_label1 = QRadioButton("Label 1 ベース")
+        self.color_mode_label1.setChecked(True)
+        self.color_mode_label2 = QRadioButton("Label 2 ベース")
+        self.color_mode_combined = QRadioButton("組み合わせ")
+        
+        self.color_mode_group.addButton(self.color_mode_label1, 0)
+        self.color_mode_group.addButton(self.color_mode_label2, 1)
+        self.color_mode_group.addButton(self.color_mode_combined, 2)
+        self.color_mode_group.buttonClicked.connect(self.on_color_mode_changed)
+        
+        color_mode_layout.addWidget(self.color_mode_label1)
+        color_mode_layout.addWidget(self.color_mode_label2)
+        color_mode_layout.addWidget(self.color_mode_combined)
+        color_mode_container.setLayout(color_mode_layout)
+        list_layout.addWidget(color_mode_container)
+        
+        # Label display toggle
+        label_display_container = QGroupBox("ラベル表示設定")
+        label_display_layout = QVBoxLayout()
+        label_display_layout.setContentsMargins(10, 5, 10, 5)
+        
+        self.show_label1_checkbox = QCheckBox("Label 1 を表示")
+        self.show_label1_checkbox.setChecked(True)
+        self.show_label1_checkbox.stateChanged.connect(self.on_show_label1_toggled)
+        
+        self.show_label2_checkbox = QCheckBox("Label 2 を表示")
+        self.show_label2_checkbox.setChecked(True)
+        self.show_label2_checkbox.stateChanged.connect(self.on_show_label2_toggled)
+        
+        label_display_layout.addWidget(self.show_label1_checkbox)
+        label_display_layout.addWidget(self.show_label2_checkbox)
+        label_display_container.setLayout(label_display_layout)
+        list_layout.addWidget(label_display_container)
         
         # Create BB duplication feature container
         bb_dup_container = QWidget()
@@ -1126,8 +1198,8 @@ class MainWindow(QMainWindow, WindowMixin):
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked)
         
-        # Use label1 for color generation
-        color_label = shape.label1 if hasattr(shape, 'label1') else shape.label
+        # Use color mode to determine color
+        color_label = self.get_color_label_for_shape(shape)
         item.setBackground(generate_color_by_text(color_label))
         
         self.items_to_shapes[item] = shape
@@ -2240,6 +2312,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.set_dirty()
 
     def load_predefined_classes(self, predef_classes_file):
+        # Load predefined classes for backward compatibility
         if os.path.exists(predef_classes_file) is True:
             with codecs.open(predef_classes_file, 'r', 'utf8') as f:
                 for line in f:
@@ -2248,6 +2321,24 @@ class MainWindow(QMainWindow, WindowMixin):
                         self.label_hist = [line]
                     else:
                         self.label_hist.append(line)
+        
+        # Load predefined classes for Label 1
+        classes1_file = os.path.join(os.path.dirname(predef_classes_file), 'predefined_classes1.txt')
+        if os.path.exists(classes1_file):
+            with codecs.open(classes1_file, 'r', 'utf8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        self.label1_hist.append(line)
+        
+        # Load predefined classes for Label 2
+        classes2_file = os.path.join(os.path.dirname(predef_classes_file), 'predefined_classes2.txt')
+        if os.path.exists(classes2_file):
+            with codecs.open(classes2_file, 'r', 'utf8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        self.label2_hist.append(line)
 
     def load_pascal_xml_by_filename(self, xml_path):
         if self.file_path is None:
@@ -2408,6 +2499,61 @@ class MainWindow(QMainWindow, WindowMixin):
     def on_change_label2_toggled(self, state):
         """Toggle label 2 change mode."""
         self.change_label2_enabled = (state == Qt.Checked)
+    
+    def on_default_label1_changed(self, text):
+        """Handle default label 1 change."""
+        self.current_label1 = text
+    
+    def on_default_label2_changed(self, text):
+        """Handle default label 2 change."""
+        self.current_label2 = text
+    
+    def on_color_mode_changed(self, button):
+        """Handle color mode change for BB display."""
+        # Update colors for all shapes based on new mode
+        for shape in self.canvas.shapes:
+            self.update_shape_color(shape)
+        
+        # Update label list colors
+        for item in self.label_list:
+            if item in self.items_to_shapes:
+                shape = self.items_to_shapes[item]
+                color_label = self.get_color_label_for_shape(shape)
+                item.setBackground(generate_color_by_text(color_label))
+        
+        # Refresh canvas
+        self.canvas.update()
+    
+    def get_color_label_for_shape(self, shape):
+        """Get the label to use for color generation based on current mode."""
+        if self.color_mode_label1.isChecked():
+            return getattr(shape, 'label1', shape.label)
+        elif self.color_mode_label2.isChecked():
+            return getattr(shape, 'label2', '')
+        else:  # Combined mode
+            label1 = getattr(shape, 'label1', shape.label)
+            label2 = getattr(shape, 'label2', '')
+            return f"{label1}_{label2}"
+    
+    def update_shape_color(self, shape):
+        """Update shape color based on current color mode."""
+        color_label = self.get_color_label_for_shape(shape)
+        shape.line_color = generate_color_by_text(color_label)
+        shape.fill_color = generate_color_by_text(color_label)
+    
+    def on_show_label1_toggled(self, state):
+        """Toggle Label 1 display."""
+        show = (state == Qt.Checked)
+        for shape in self.canvas.shapes:
+            shape.show_label1 = show
+        self.canvas.update()
+    
+    def on_show_label2_toggled(self, state):
+        """Toggle Label 2 display."""
+        show = (state == Qt.Checked)
+        for shape in self.canvas.shapes:
+            shape.show_label2 = show
+        self.canvas.update()
     
     def toggle_bb_duplication(self, state):
         """Toggle BB duplication mode."""
