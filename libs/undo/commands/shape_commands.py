@@ -54,6 +54,15 @@ class AddShapeCommand(Command):
             shape = Shape()
             shape.label = self.shape_data.get('label', '')
             
+            # Dual label support
+            if 'label2' in self.shape_data and self.shape_data['label2'] is not None:
+                shape.label2 = self.shape_data['label2']
+            else:
+                shape.label2 = ''
+            
+            # Set label1 for consistency
+            shape.label1 = shape.label
+            
             # Convert points to QPointF
             points = self.shape_data.get('points', [])
             shape.points = [QPointF(x, y) for x, y in points]
@@ -188,6 +197,10 @@ class DeleteShapeCommand(Command):
             'difficult': shape.difficult if hasattr(shape, 'difficult') else False
         }
         
+        # Store dual label data
+        if hasattr(shape, 'label2') and shape.label2 is not None:
+            self.shape_data['label2'] = shape.label2
+        
         # Store additional properties if they exist
         if hasattr(shape, 'line_color'):
             self.shape_data['line_color'] = shape.line_color
@@ -265,6 +278,15 @@ class DeleteShapeCommand(Command):
             # Recreate shape
             shape = Shape()
             shape.label = self.shape_data.get('label', '')
+            
+            # Restore dual label support
+            if 'label2' in self.shape_data and self.shape_data['label2'] is not None:
+                shape.label2 = self.shape_data['label2']
+            else:
+                shape.label2 = ''
+            
+            # Set label1 for consistency
+            shape.label1 = shape.label
             
             # Convert points to QPointF
             points = self.shape_data.get('points', [])

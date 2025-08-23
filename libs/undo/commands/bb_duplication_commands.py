@@ -119,6 +119,7 @@ class AddShapeWithIOUCheckCommand(AddShapeCommand):
                     # Store shape data for undo
                     shape_data = {
                         'label': shape_to_remove.label,
+                        'label2': shape_to_remove.label2 if hasattr(shape_to_remove, 'label2') else None,
                         'points': [(p.x(), p.y()) for p in shape_to_remove.points],
                         'difficult': shape_to_remove.difficult if hasattr(shape_to_remove, 'difficult') else False
                     }
@@ -251,6 +252,8 @@ class AddShapeWithIOUCheckCommand(AddShapeCommand):
         for shape_data in self.removed_shapes:
             shape = Shape()
             shape.label = shape_data.get('label', '')
+            shape.label1 = shape.label  # Set label1 same as label
+            shape.label2 = shape_data.get('label2', None)
             shape.points = [QPointF(x, y) for x, y in shape_data.get('points', [])]
             shape.close()
             

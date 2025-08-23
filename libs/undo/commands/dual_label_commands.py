@@ -68,25 +68,55 @@ class ChangeDualLabelCommand(Command):
             if self.change_label1:
                 shape.label1 = self.new_label1
                 shape.label = self.new_label1  # For backward compatibility
+            else:
+                # Keep existing label1
+                if hasattr(shape, 'label1'):
+                    shape.label1 = shape.label1
+                else:
+                    shape.label1 = shape.label
             
             if self.change_label2:
                 shape.label2 = self.new_label2
+            else:
+                # Keep existing label2
+                if not hasattr(shape, 'label2'):
+                    shape.label2 = ''
+            
+            # Update shape colors based on current color mode
+            if hasattr(app, 'update_shape_color'):
+                app.update_shape_color(shape)
+            else:
+                # Fallback: update colors based on label
+                from libs.utils import generate_color_by_text
+                color_label = app.get_color_label_for_shape(shape) if hasattr(app, 'get_color_label_for_shape') else shape.label1
+                shape.line_color = generate_color_by_text(color_label)
+                shape.fill_color = generate_color_by_text(color_label)
             
             # Update the item in the label list
             item = app.shapes_to_items.get(shape)
             if item:
-                # Update item text to show both labels
+                # Update item text to show both labels correctly
                 text_parts = []
-                if hasattr(shape, 'label1') and shape.label1:
-                    text_parts.append(shape.label1)
+                # Use the current label1 value
+                label1_text = shape.label1 if hasattr(shape, 'label1') else shape.label
+                if label1_text:
+                    text_parts.append(label1_text)
+                # Use the current label2 value
                 if hasattr(shape, 'label2') and shape.label2:
                     text_parts.append(shape.label2)
-                text = " | ".join(text_parts) if len(text_parts) > 1 else " ".join(text_parts)
+                
+                # Format correctly: "label1 | label2" or just "label1"
+                text = " | ".join(text_parts) if len(text_parts) > 1 else (text_parts[0] if text_parts else "")
                 item.setText(text)
+                
+                # Update item background color
+                from libs.utils import generate_color_by_text
+                color_label = app.get_color_label_for_shape(shape) if hasattr(app, 'get_color_label_for_shape') else shape.label1
+                item.setBackground(generate_color_by_text(color_label))
             
-            # Update canvas
+            # Update canvas to reflect color changes
             app.canvas.load_shapes(app.canvas.shapes)
-            app.canvas.update()
+            app.canvas.repaint()
             
             # Mark as dirty
             app.set_dirty()
@@ -137,6 +167,16 @@ class ChangeDualLabelCommand(Command):
             if self.change_label2:
                 shape.label2 = self.old_label2
             
+            # Update shape colors based on current color mode
+            if hasattr(app, 'update_shape_color'):
+                app.update_shape_color(shape)
+            else:
+                # Fallback: update colors based on label
+                from libs.utils import generate_color_by_text
+                color_label = app.get_color_label_for_shape(shape) if hasattr(app, 'get_color_label_for_shape') else shape.label1
+                shape.line_color = generate_color_by_text(color_label)
+                shape.fill_color = generate_color_by_text(color_label)
+            
             # Update the item in the label list
             item = app.shapes_to_items.get(shape)
             if item:
@@ -148,10 +188,15 @@ class ChangeDualLabelCommand(Command):
                     text_parts.append(shape.label2)
                 text = " | ".join(text_parts) if len(text_parts) > 1 else " ".join(text_parts)
                 item.setText(text)
+                
+                # Update item background color
+                from libs.utils import generate_color_by_text
+                color_label = app.get_color_label_for_shape(shape) if hasattr(app, 'get_color_label_for_shape') else shape.label1
+                item.setBackground(generate_color_by_text(color_label))
             
             # Update canvas
             app.canvas.load_shapes(app.canvas.shapes)
-            app.canvas.update()
+            app.canvas.repaint()
             
             # Mark as dirty
             app.set_dirty()

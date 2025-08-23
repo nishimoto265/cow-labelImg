@@ -129,7 +129,13 @@ class ChangeLabelCommand(Command):
                 
                 # Update the label
                 old_shape = shapes[self.shape_index]
-                new_shape = (label, old_shape[1], old_shape[2], old_shape[3], old_shape[4])
+                
+                # Handle both dict and tuple formats for shape update
+                if isinstance(old_shape, dict):
+                    new_shape = old_shape.copy()
+                    new_shape['label'] = label
+                else:
+                    new_shape = (label, old_shape[1], old_shape[2], old_shape[3], old_shape[4])
                 shapes[self.shape_index] = new_shape
                 
                 # Write back to file using YOLOWriter
@@ -141,17 +147,30 @@ class ChangeLabelCommand(Command):
                 writer.verified = True
                 
                 # Add shapes to writer
-                for shape_label, points, _, _, difficult in shapes:
+                for shape_data in shapes:
+                    # Handle both dict and tuple formats
+                    if isinstance(shape_data, dict):
+                        shape_label = shape_data.get('label', '')
+                        label2 = shape_data.get('label2', None)
+                        points = shape_data.get('points', [])
+                        difficult = shape_data.get('difficult', False)
+                    else:
+                        # Tuple format (backward compatibility)
+                        shape_label, points, _, _, difficult = shape_data
+                        label2 = None
+                    
                     # Convert points to bounding box for YOLO format
                     if len(points) >= 4:
                         x_min = min(p[0] for p in points)
                         y_min = min(p[1] for p in points)
                         x_max = max(p[0] for p in points)
                         y_max = max(p[1] for p in points)
-                        writer.add_bnd_box(x_min, y_min, x_max, y_max, shape_label, difficult)
+                        writer.add_bnd_box(x_min, y_min, x_max, y_max, shape_label, difficult, label2)
                 
-                # Save with the class list
-                writer.save(app.label_hist if hasattr(app, 'label_hist') else [], annotation_path)
+                # Save with the class lists
+                class_list1 = app.label_hist if hasattr(app, 'label_hist') else []
+                class_list2 = app.label2_hist if hasattr(app, 'label2_hist') else []
+                writer.save(class_list=class_list1, class_list2=class_list2, target_file=annotation_path)
             else:
                 # Pascal VOC XML format
                 from libs.pascal_voc_io import PascalVocReader, PascalVocWriter
@@ -176,9 +195,18 @@ class ChangeLabelCommand(Command):
                 img_size = reader.img_size if hasattr(reader, 'img_size') else [0, 0, 3]
                 
                 writer = PascalVocWriter(img_folder, img_name, img_size, database="Unknown")
-                for shape_label, points, line_color, fill_color, difficult in shapes:
-                    writer.add_bnd_box(points[0][0], points[0][1], points[2][0], points[2][1], 
-                                     shape_label, difficult)
+                for shape_data in shapes:
+                    # Handle both dict and tuple formats
+                    if isinstance(shape_data, dict):
+                        shape_label = shape_data.get('label', '')
+                        points = shape_data.get('points', [])
+                        difficult = shape_data.get('difficult', False)
+                    else:
+                        shape_label, points, line_color, fill_color, difficult = shape_data
+                    
+                    if len(points) >= 4:
+                        writer.add_bnd_box(points[0][0], points[0][1], points[2][0], points[2][1], 
+                                         shape_label, difficult)
                 writer.save(annotation_path)
             
             logger.debug(f"Changed label in {annotation_path}: {self.old_label} -> {label}")

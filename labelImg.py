@@ -122,6 +122,12 @@ class MainWindow(QMainWindow, WindowMixin):
             self.default_label = self.label_hist[0]
         else:
             print("Not find:/data/predefined_classes.txt (optional)")
+        
+        # Initialize default_label2
+        if self.label2_hist:
+            self.default_label2 = self.label2_hist[0]
+        else:
+            self.default_label2 = ""
 
         # Main widgets and related state.
         self.label_dialog = LabelDialog(parent=self, list_item=self.label_hist)
@@ -160,7 +166,8 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Initialize Quick ID Selector
         self.quick_id_selector = QuickIDSelector(parent=self, max_ids=30)
-        self.quick_id_selector.id_selected.connect(self.on_quick_id_selected)
+        self.quick_id_selector.label1_selected.connect(self.on_quick_label1_selected)
+        self.quick_id_selector.label2_selected.connect(self.on_quick_label2_selected)
         self.current_quick_id = "1"  # デフォルトID
         
         # BB ID管理
@@ -774,6 +781,34 @@ class MainWindow(QMainWindow, WindowMixin):
         if xbool(settings.get(SETTING_ADVANCE_MODE, False)):
             self.actions.advancedMode.setChecked(True)
             self.toggle_advanced_mode()
+        
+        # デュアルラベル設定を復元
+        if settings.get('DUAL_LABEL_MODE', False):
+            self.change_label1_checkbox.setChecked(settings.get('CHANGE_LABEL1', True))
+            self.change_label2_checkbox.setChecked(settings.get('CHANGE_LABEL2', False))
+            
+            bb_color_mode = settings.get('BB_COLOR_MODE', 0)
+            if bb_color_mode == 0:
+                self.color_mode_label1.setChecked(True)
+            elif bb_color_mode == 1:
+                self.color_mode_label2.setChecked(True)
+            else:
+                self.color_mode_combined.setChecked(True)
+            
+            self.show_label1_checkbox.setChecked(settings.get('SHOW_LABEL1', True))
+            self.show_label2_checkbox.setChecked(settings.get('SHOW_LABEL2', True))
+            if hasattr(self, 'use_default_label_checkbox'):
+                self.use_default_label_checkbox.setChecked(settings.get('USE_DEFAULT_LABEL1', False))
+            if hasattr(self, 'use_default_dual_labels'):
+                self.use_default_dual_labels.setChecked(settings.get('USE_DEFAULT_DUAL_LABELS', False))
+            
+            # デフォルトラベルの復元
+            default_label1 = settings.get('DEFAULT_LABEL1', '')
+            default_label2 = settings.get('DEFAULT_LABEL2', '')
+            if default_label1:
+                self.default_label = default_label1
+            if default_label2:
+                self.default_label2 = default_label2
 
         # Populate the File menu dynamically.
         self.update_file_menu()
@@ -824,14 +859,36 @@ class MainWindow(QMainWindow, WindowMixin):
             self.toggle_quick_id_selector()
             return
         
-        # 数字キー（1-9）: Quick ID直接選択
-        if Qt.Key_1 <= event.key() <= Qt.Key_9:
+        # Alt+1: Label1タブへ切り替え
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_1:
+            if self.quick_id_selector.isVisible():
+                self.quick_id_selector.tab_widget.setCurrentIndex(0)
+            # Label1を変更をONにする
+            self.change_label1_checkbox.setChecked(True)
+            return
+        
+        # Alt+2: Label2タブへ切り替え
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_2:
+            if self.quick_id_selector.isVisible():
+                self.quick_id_selector.tab_widget.setCurrentIndex(1)
+            # Label2を変更をONにする
+            self.change_label2_checkbox.setChecked(True)
+            return
+        
+        # Alt+3: 両方のラベルを変更をONにする
+        if event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_3:
+            self.change_label1_checkbox.setChecked(True)
+            self.change_label2_checkbox.setChecked(True)
+            return
+        
+        # 数字キー（1-9）: Quick ID直接選択（Altが押されていない場合）
+        if event.modifiers() == Qt.NoModifier and Qt.Key_1 <= event.key() <= Qt.Key_9:
             id_num = event.key() - Qt.Key_0
             self.select_quick_id(str(id_num))
             return
         
         # 0キー: ID 10を選択
-        elif event.key() == Qt.Key_0:
+        elif event.modifiers() == Qt.NoModifier and event.key() == Qt.Key_0:
             self.select_quick_id("10")
             return
         
@@ -1176,7 +1233,11 @@ class MainWindow(QMainWindow, WindowMixin):
         else:
             shape = self.canvas.selected_shape
             if shape:
-                self.shapes_to_items[shape].setSelected(True)
+                # Check if shape exists in dictionary
+                if shape in self.shapes_to_items:
+                    self.shapes_to_items[shape].setSelected(True)
+                else:
+                    print(f"[Warning] Selected shape not found in shapes_to_items dictionary")
             else:
                 self.label_list.clearSelection()
         
@@ -1191,16 +1252,34 @@ class MainWindow(QMainWindow, WindowMixin):
         shape.paint_label = self.display_label_option.isChecked()
         shape.paint_id = self.draw_id_checkbox.isChecked()
         
+        # Ensure shape.label1 and shape.label2 are properly set
+        if not hasattr(shape, 'label1'):
+            shape.label1 = shape.label if hasattr(shape, 'label') else ""
+        if not hasattr(shape, 'label2'):
+            shape.label2 = ""
+        
+        # Clean up label if it contains mixed format
+        if shape.label and ' | ' in shape.label:
+            parts = shape.label.split(' | ')
+            shape.label = parts[0]
+            shape.label1 = parts[0]
+            if len(parts) > 1 and not shape.label2:
+                shape.label2 = parts[1]
+        
         # Create label text for display
         text_parts = []
-        if hasattr(shape, 'label1') and shape.label1:
+        # Always use label1 for first part
+        if shape.label1:
             text_parts.append(shape.label1)
         elif shape.label:
             text_parts.append(shape.label)
+            shape.label1 = shape.label  # Sync label1 with label
         
-        if hasattr(shape, 'label2') and shape.label2:
+        # Add label2 if exists
+        if shape.label2:
             text_parts.append(shape.label2)
         
+        # Format: "label1 | label2" or just "label1"
         display_text = " | ".join(text_parts) if len(text_parts) > 1 else (text_parts[0] if text_parts else "")
         
         item = HashableQListWidgetItem(display_text)
@@ -1226,6 +1305,12 @@ class MainWindow(QMainWindow, WindowMixin):
         if shape is None:
             # print('rm empty label')
             return
+        
+        # Check if shape exists in dictionary
+        if shape not in self.shapes_to_items:
+            print(f"[Warning] Shape not found in shapes_to_items dictionary")
+            return
+            
         item = self.shapes_to_items[shape]
         self.label_list.takeItem(self.label_list.row(item))
         del self.shapes_to_items[shape]
@@ -1303,6 +1388,9 @@ class MainWindow(QMainWindow, WindowMixin):
                         points=[(p.x(), p.y()) for p in s.points],
                         # add chris
                         difficult=s.difficult)
+            # Add label2 for dual label support
+            if hasattr(s, 'label2'):
+                result['label2'] = s.label2
             return result
 
         shapes = [format_shape(shape) for shape in self.canvas.shapes]
@@ -1317,7 +1405,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 if annotation_file_path[-4:].lower() != ".txt":
                     annotation_file_path += TXT_EXT
                 self.label_file.save_yolo_format(annotation_file_path, shapes, self.file_path, self.image_data, self.label_hist,
-                                                 self.line_color.getRgb(), self.fill_color.getRgb())
+                                                 self.line_color.getRgb(), self.fill_color.getRgb(), class_list2=self.label2_hist)
             elif self.label_file_format == LabelFileFormat.CREATE_ML:
                 if annotation_file_path[-5:].lower() != ".json":
                     annotation_file_path += JSON_EXT
@@ -1584,6 +1672,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     # Create shape data for duplication
                     dup_shape_data = {
                         'label': shape.label,
+                        'label2': shape.label2 if hasattr(shape, 'label2') else None,
                         'points': [(p.x(), p.y()) for p in shape.points],
                         'difficult': shape.difficult if hasattr(shape, 'difficult') else False,
                         'line_color': shape.line_color,
@@ -1969,6 +2058,20 @@ class MainWindow(QMainWindow, WindowMixin):
         settings[SETTING_PAINT_LABEL] = self.display_label_option.isChecked()
         settings[SETTING_DRAW_SQUARE] = self.draw_squares_option.isChecked()
         settings[SETTING_LABEL_FILE_FORMAT] = self.label_file_format
+        
+        # デュアルラベル設定を保存
+        settings['DUAL_LABEL_MODE'] = True
+        settings['CHANGE_LABEL1'] = self.change_label1_checkbox.isChecked()
+        settings['CHANGE_LABEL2'] = self.change_label2_checkbox.isChecked()
+        if hasattr(self, 'color_mode_group'):
+            settings['BB_COLOR_MODE'] = self.color_mode_group.checkedId()
+        settings['SHOW_LABEL1'] = self.show_label1_checkbox.isChecked()
+        settings['SHOW_LABEL2'] = self.show_label2_checkbox.isChecked()
+        settings['USE_DEFAULT_LABEL1'] = self.use_default_label_checkbox.isChecked() if hasattr(self, 'use_default_label_checkbox') else False
+        settings['USE_DEFAULT_DUAL_LABELS'] = self.use_default_dual_labels.isChecked() if hasattr(self, 'use_default_dual_labels') else False
+        settings['DEFAULT_LABEL1'] = self.default_label
+        settings['DEFAULT_LABEL2'] = self.default_label2
+        
         settings.save()
 
     def load_recent(self, filename):
@@ -2332,23 +2435,57 @@ class MainWindow(QMainWindow, WindowMixin):
                     else:
                         self.label_hist.append(line)
         
+        # Try to load classes1.txt and classes2.txt from different locations
+        dir_path = os.path.dirname(predef_classes_file)
+        base_name = os.path.basename(predef_classes_file)
+        
         # Load predefined classes for Label 1
-        classes1_file = os.path.join(os.path.dirname(predef_classes_file), 'predefined_classes1.txt')
+        # First try: classes1.txt in the same directory
+        classes1_file = os.path.join(dir_path, 'classes1.txt')
+        if not os.path.exists(classes1_file):
+            # Second try: predefined_classes1.txt in data directory
+            classes1_file = os.path.join(os.path.dirname(__file__), 'data', 'predefined_classes1.txt')
+        
         if os.path.exists(classes1_file):
+            print(f"Loading Label1 classes from: {classes1_file}")
             with codecs.open(classes1_file, 'r', 'utf8') as f:
                 for line in f:
                     line = line.strip()
                     if line:
                         self.label1_hist.append(line)
         
+        # If label1_hist is empty, copy from label_hist
+        if not self.label1_hist and self.label_hist:
+            self.label1_hist = self.label_hist.copy()
+            print(f"Copied label_hist to label1_hist: {self.label1_hist[:5]}")
+        
         # Load predefined classes for Label 2
-        classes2_file = os.path.join(os.path.dirname(predef_classes_file), 'predefined_classes2.txt')
+        # First try: classes2.txt in the same directory
+        classes2_file = os.path.join(dir_path, 'classes2.txt')
+        if not os.path.exists(classes2_file):
+            # Second try: predefined_classes2.txt in data directory
+            classes2_file = os.path.join(os.path.dirname(__file__), 'data', 'predefined_classes2.txt')
+        
         if os.path.exists(classes2_file):
+            print(f"Loading Label2 classes from: {classes2_file}")
             with codecs.open(classes2_file, 'r', 'utf8') as f:
                 for line in f:
                     line = line.strip()
                     if line:
                         self.label2_hist.append(line)
+        
+        # Update combo boxes if they exist (they might be created after this method)
+        if hasattr(self, 'default_label1_combo_box'):
+            self.default_label1_combo_box.cb.clear()
+            self.default_label1_combo_box.cb.addItems(self.label1_hist)
+            print(f"Updated Label1 combo box with {len(self.label1_hist)} items")
+        
+        if hasattr(self, 'default_label2_combo_box'):
+            self.default_label2_combo_box.cb.clear()
+            self.default_label2_combo_box.cb.addItems(self.label2_hist)
+            print(f"Updated Label2 combo box with {len(self.label2_hist)} items")
+        
+        print(f"Loaded classes - Label1: {len(self.label1_hist)} items, Label2: {len(self.label2_hist)} items")
 
     def load_pascal_xml_by_filename(self, xml_path):
         if self.file_path is None:
@@ -2517,6 +2654,7 @@ class MainWindow(QMainWindow, WindowMixin):
     def on_default_label2_changed(self, text):
         """Handle default label 2 change."""
         self.current_label2 = text
+        self.default_label2 = text
     
     def on_color_mode_changed(self, button):
         """Handle color mode change for BB display."""
@@ -2525,7 +2663,8 @@ class MainWindow(QMainWindow, WindowMixin):
             self.update_shape_color(shape)
         
         # Update label list colors
-        for item in self.label_list:
+        for i in range(self.label_list.count()):
+            item = self.label_list.item(i)
             if item in self.items_to_shapes:
                 shape = self.items_to_shapes[item]
                 color_label = self.get_color_label_for_shape(shape)
@@ -2606,8 +2745,34 @@ class MainWindow(QMainWindow, WindowMixin):
         prev_num = current_num - 1 if current_num > 1 else max_ids
         self.select_quick_id(str(prev_num))
     
+    def on_quick_label1_selected(self, class_name):
+        """Quick ID SelectorからのLabel1シグナルを受信"""
+        # デフォルトラベル1を更新
+        if hasattr(self, 'use_default_label_checkbox1') and self.use_default_label_checkbox1.isChecked():
+            # コンボボックスでクラスを選択
+            if hasattr(self, 'default_label1_combo_box'):
+                index = self.default_label1_combo_box.cb.findText(class_name)
+                if index >= 0:
+                    self.default_label1_combo_box.cb.setCurrentIndex(index)
+                    self.default_label = class_name
+        
+        print(f"[QuickID] Label1 selected from selector: {class_name}")
+    
+    def on_quick_label2_selected(self, class_name):
+        """Quick ID SelectorからのLabel2シグナルを受信"""
+        # デフォルトラベル2を更新
+        if hasattr(self, 'use_default_label_checkbox2') and self.use_default_label_checkbox2.isChecked():
+            # コンボボックスでクラスを選択
+            if hasattr(self, 'default_label2_combo_box'):
+                index = self.default_label2_combo_box.cb.findText(class_name)
+                if index >= 0:
+                    self.default_label2_combo_box.cb.setCurrentIndex(index)
+                    self.default_label2 = class_name
+        
+        print(f"[QuickID] Label2 selected from selector: {class_name}")
+    
     def on_quick_id_selected(self, id_str):
-        """Quick ID Selectorからのシグナルを受信"""
+        """Quick ID Selectorからのシグナルを受信（旧互換性）"""
         self.current_quick_id = id_str
         
         # ステータスバーの表示を更新
@@ -2640,34 +2805,85 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.canvas.selected_shape:
             shape = self.canvas.selected_shape
             
-            # Quick IDに対応する実際のクラス名を取得（IDサフィックスなし）
-            new_label = self.get_class_name_for_quick_id(self.current_quick_id)
-            
-            # ラベルが変更される場合のみ処理
-            old_label = shape.label
-            if old_label != new_label:
-                # 連続ID付けモードの場合はマルチフレーム操作として処理
-                if self.continuous_tracking_mode:
-                    print(f"[QuickID] Starting continuous ID assignment: {old_label} -> {new_label}")
-                    
-                    # マルチフレーム操作として処理
-                    self.apply_quick_id_with_propagation(shape, new_label, old_label)
-                else:
-                    # 通常モード: 単一フレームの変更のみ
-                    
-                    # ラベルを更新
-                    shape.label = new_label
-                    
-                    # リストアイテムも更新
-                    if shape in self.shapes_to_items:
-                        item = self.shapes_to_items[shape]
-                        item.setText(new_label)
-                    
-                    # UIを更新
-                    self.set_dirty()
-                    self.update_combo_box()
-                    
-                    print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}")
+            # In dual label mode, Quick ID should update label2 (ID field)
+            if self.dual_label_mode:
+                # Quick IDはIDフィールド（label2）を更新する
+                new_id = f"ID-{self.current_quick_id.zfill(3)}"  # Format as ID-001, ID-002, etc.
+                old_id = shape.label2 if hasattr(shape, 'label2') else ""
+                
+                if old_id != new_id:
+                    # 連続ID付けモードの場合はマルチフレーム操作として処理
+                    if self.continuous_tracking_mode:
+                        print(f"[QuickID] Starting continuous ID assignment: {old_id} -> {new_id}")
+                        # マルチフレーム操作として処理
+                        self.apply_quick_id_with_propagation_label2(shape, new_id, old_id)
+                    else:
+                        # 通常モード: 単一フレームの変更のみ
+                        shape.label2 = new_id
+                        
+                        # Update shape colors based on current color mode
+                        self.update_shape_color(shape)
+                        
+                        # Update display text to show both labels
+                        display_text = f"{shape.label} | {new_id}" if shape.label else new_id
+                        
+                        # リストアイテムも更新
+                        if shape in self.shapes_to_items:
+                            item = self.shapes_to_items[shape]
+                            item.setText(display_text)
+                            # Update item background color
+                            color_label = self.get_color_label_for_shape(shape)
+                            item.setBackground(generate_color_by_text(color_label))
+                        
+                        # Update canvas to reflect color changes
+                        self.canvas.load_shapes(self.canvas.shapes)
+                        self.canvas.repaint()
+                        
+                        # UIを更新
+                        self.set_dirty()
+                        self.update_combo_box()
+                        
+                        print(f"[QuickID] Applied ID {new_id} to shape label2")
+            else:
+                # Original behavior for single label mode
+                # Quick IDに対応する実際のクラス名を取得（IDサフィックスなし）
+                new_label = self.get_class_name_for_quick_id(self.current_quick_id)
+                
+                # ラベルが変更される場合のみ処理
+                old_label = shape.label
+                if old_label != new_label:
+                    # 連続ID付けモードの場合はマルチフレーム操作として処理
+                    if self.continuous_tracking_mode:
+                        print(f"[QuickID] Starting continuous ID assignment: {old_label} -> {new_label}")
+                        
+                        # マルチフレーム操作として処理
+                        self.apply_quick_id_with_propagation(shape, new_label, old_label)
+                    else:
+                        # 通常モード: 単一フレームの変更のみ
+                        
+                        # ラベルを更新
+                        shape.label = new_label
+                        
+                        # Update shape colors
+                        shape.line_color = generate_color_by_text(new_label)
+                        shape.fill_color = generate_color_by_text(new_label)
+                        
+                        # リストアイテムも更新
+                        if shape in self.shapes_to_items:
+                            item = self.shapes_to_items[shape]
+                            item.setText(new_label)
+                            # Update item background color
+                            item.setBackground(generate_color_by_text(new_label))
+                        
+                        # Update canvas to reflect color changes
+                        self.canvas.load_shapes(self.canvas.shapes)
+                        self.canvas.repaint()
+                        
+                        # UIを更新
+                        self.set_dirty()
+                        self.update_combo_box()
+                        
+                        print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}")
         else:
             print("[QuickID] No shape selected for ID application")
     
@@ -2713,6 +2929,49 @@ class MainWindow(QMainWindow, WindowMixin):
             self.statusBar().showMessage(f'連続ID付けが完了しました。{frames_processed + 1}フレームに適用しました。', 3000)
         else:
             self.statusBar().showMessage(f'IDを変更しました: {old_label} -> {new_label}', 3000)
+    
+    def apply_quick_id_with_propagation_label2(self, shape, new_id, old_id):
+        """連続ID付けモードでlabel2（ID）を適用し、後続フレームに伝播させる"""
+        if not self.continuous_tracking_mode or not shape:
+            return
+        
+        # 現在のフレーム情報を保存
+        current_file = self.file_path
+        current_idx = self.cur_img_idx
+        
+        # Apply label2 change to current frame
+        shape.label2 = new_id
+        
+        # Update display text to show both labels
+        display_text = f"{shape.label} | {new_id}" if shape.label else new_id
+        
+        # リストアイテムも更新
+        if shape in self.shapes_to_items:
+            item = self.shapes_to_items[shape]
+            item.setText(display_text)
+        
+        # UIを更新
+        self.set_dirty()
+        self.update_combo_box()
+        
+        # 現在のフレームを保存（必要なら）
+        if self.auto_saving.isChecked() and self.default_save_dir:
+            self.save_file()
+        
+        print(f"[QuickID] Applied label2 to current frame: {old_id} -> {new_id}")
+        
+        # 後続フレームに伝播 - label2用の伝播関数を使用
+        frames_processed = self._propagate_label2_to_subsequent_frames_multi(shape, new_id, "QuickID")
+        
+        # 元のフレームに戻る
+        if self.file_path != current_file:
+            self.load_file(current_file, preserve_zoom=True)
+        
+        # ステータスメッセージ
+        if frames_processed > 0:
+            self.statusBar().showMessage(f'連続ID付けが完了しました。{frames_processed + 1}フレームに適用しました。', 3000)
+        else:
+            self.statusBar().showMessage(f'IDを変更しました: {old_id} -> {new_id}', 3000)
     
     def get_class_name_for_quick_id(self, quick_id):
         """Quick IDに対応するクラス名を取得（classes.txtから直接）"""
@@ -2810,16 +3069,27 @@ class MainWindow(QMainWindow, WindowMixin):
                         if not os.path.exists(image_path):
                             image_path = os.path.splitext(annotation_path)[0] + '.jpg'
                 
-                # Get image
+                # Get image - use current image size if available to ensure consistent coordinates
                 from PyQt5.QtGui import QImage
                 img = QImage()
-                if img.load(image_path):
-                    # YoloReader expects the QImage object, not the shape
-                    yolo_reader = YoloReader(annotation_path, img)
+                
+                # If we have a current image loaded, use its size for consistent coordinate conversion
+                if hasattr(self, 'image') and self.image and not self.image.isNull():
+                    img = QImage(self.image.size(), QImage.Format_RGB888)
+                elif img.load(image_path):
+                    # Use the actual image if current image not available
+                    pass
                 else:
                     # If image can't be loaded, skip
                     print(f"[Warning] Could not load image for YOLO annotation: {image_path}")
                     return shapes
+                
+                if img.isNull():
+                    print(f"[Warning] Image is null for YOLO annotation: {image_path}")
+                    return shapes
+                    
+                # YoloReader expects the QImage object, not the shape
+                yolo_reader = YoloReader(annotation_path, img)
                     
                 shapes_data = yolo_reader.get_shapes()
             else:
@@ -2828,15 +3098,37 @@ class MainWindow(QMainWindow, WindowMixin):
                 tVocParseReader = PascalVocReader(annotation_path)
                 shapes_data = tVocParseReader.get_shapes()
             
-            for label, points, line_color, fill_color, difficult in shapes_data:
-                shape = {
-                    'label': label,
-                    'points': points,
-                    'difficult': difficult,
-                    'line_color': line_color,
-                    'fill_color': fill_color
-                }
-                shapes.append(shape)
+            for shape_item in shapes_data:
+                # Handle both tuple format (backward compatibility) and dict format (dual label)
+                if isinstance(shape_item, dict):
+                    # Already in dict format (dual label)
+                    shapes.append(shape_item)
+                elif isinstance(shape_item, (tuple, list)):
+                    # Convert tuple format to dict
+                    if len(shape_item) == 5:
+                        label, points, line_color, fill_color, difficult = shape_item
+                        shape = {
+                            'label': label,
+                            'points': points,
+                            'difficult': difficult,
+                            'line_color': line_color,
+                            'fill_color': fill_color
+                        }
+                    elif len(shape_item) == 6:
+                        # Might have label2 as 6th element
+                        label, points, line_color, fill_color, difficult, label2 = shape_item
+                        shape = {
+                            'label': label,
+                            'label2': label2,
+                            'points': points,
+                            'difficult': difficult,
+                            'line_color': line_color,
+                            'fill_color': fill_color
+                        }
+                    else:
+                        print(f"[Warning] Unknown shape format with {len(shape_item)} elements")
+                        continue
+                    shapes.append(shape)
         except Exception as e:
             print(f"Error loading annotation file {annotation_path}: {e}")
         
@@ -3052,7 +3344,7 @@ class MainWindow(QMainWindow, WindowMixin):
             return
         
         # If continuous tracking mode is ON, propagate label using IOU tracking
-        if self.continuous_tracking_mode and not self.dual_label_mode:
+        if self.continuous_tracking_mode:
             print(f"[ContinuousTracking] Starting IOU-based label propagation: '{old_label1}' -> '{new_label1}'")
             
             # Create progress dialog
@@ -3072,10 +3364,23 @@ class MainWindow(QMainWindow, WindowMixin):
             # Create list of commands for all frames to update
             change_commands = []
             
-            # First, change the current frame (don't use direct_file_edit for current frame)
-            change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label, direct_file_edit=False)
+            # First, change the current frame
+            if self.dual_label_mode:
+                # Use dual label command for dual label mode
+                change_cmd = ChangeDualLabelCommand(self.file_path, shape_index, 
+                                                   old_label1, new_label1,
+                                                   old_label2, new_label2,
+                                                   self.change_label1_enabled, self.change_label2_enabled)
+            else:
+                # Use single label command for single label mode  
+                # Note: old_label and new_label are only defined in single label mode branch
+                if 'old_label' in locals() and 'new_label' in locals():
+                    change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label, direct_file_edit=False)
+                else:
+                    # Fallback to label1 for safety
+                    change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label1, new_label1, direct_file_edit=False)
             change_commands.append(change_cmd)
-            print(f"[ContinuousTracking] Changed current frame {current_idx}: '{old_label}' -> '{new_label}'")
+            print(f"[ContinuousTracking] Changed current frame {current_idx}: '{old_label1}' -> '{new_label1}'")
             
             # Get current shape's points for IOU matching
             current_shape_points = [(p.x(), p.y()) for p in shape.points]
@@ -3120,6 +3425,11 @@ class MainWindow(QMainWindow, WindowMixin):
                         target_points = target_shape_data.get('points', [])
                         shape_label = target_shape_data.get('label')
                         
+                        # Debug: Print first point of each shape to see coordinate ranges
+                        if idx == 0 and len(target_points) > 0 and len(prev_shape_points) > 0:
+                            print(f"[DEBUG] Prev shape first point: {prev_shape_points[0]}")
+                            print(f"[DEBUG] Target shape first point: {target_points[0]}")
+                        
                         # Calculate IOU regardless of label
                         if len(target_points) == 4 and len(prev_shape_points) == 4:
                             iou = self.calculate_iou(prev_shape_points, target_points)
@@ -3132,17 +3442,61 @@ class MainWindow(QMainWindow, WindowMixin):
                                 best_match_label = shape_label
                     
                     if best_match_idx >= 0:
+                        # Determine which label to use based on mode
+                        target_new_label = new_label1  # Default to label1
+                        if self.dual_label_mode:
+                            # In dual label mode, check which label is being changed
+                            if self.change_label2_enabled and new_label2 != old_label2:
+                                # We're changing label2 (ID)
+                                target_new_label = new_label2
+                                # Get current label2 from shape data
+                                best_match_label = shapes_in_target[best_match_idx].get('label2', '')
+                            else:
+                                # We're changing label1
+                                target_new_label = new_label1
+                        elif 'new_label' in locals():
+                            # Single label mode with new_label defined
+                            target_new_label = new_label
+                        
                         # Check if we hit the target label (stop condition)
-                        if best_match_label == new_label:
-                            print(f"[ContinuousTracking] Found shape with target label '{new_label}' at frame {target_idx}, stopping")
+                        if best_match_label == target_new_label:
+                            print(f"[ContinuousTracking] Found shape with target label '{target_new_label}' at frame {target_idx}, stopping")
                             break
                         
-                        # Found matching shape, change its label to new_label
+                        # Found matching shape, change its label to target_new_label
                         print(f"[ContinuousTracking] Tracking successful at frame {target_idx}")
-                        print(f"[ContinuousTracking]   - Shape {best_match_idx}: '{best_match_label}' -> '{new_label}' (IOU={best_iou:.3f})")
                         
-                        # Create change command (change whatever label it has to new_label)
-                        change_cmd = ChangeLabelCommand(target_file, best_match_idx, best_match_label, new_label, direct_file_edit=True)
+                        # Print appropriate debug message based on what's being changed
+                        if self.dual_label_mode:
+                            old_l1 = shapes_in_target[best_match_idx].get('label', '')
+                            old_l2 = shapes_in_target[best_match_idx].get('label2', '')
+                            changes = []
+                            if self.change_label1_enabled:
+                                changes.append(f"label1: '{old_l1}' -> '{new_label1}'")
+                            if self.change_label2_enabled:
+                                changes.append(f"label2: '{old_l2}' -> '{new_label2}'")
+                            print(f"[ContinuousTracking]   - Shape {best_match_idx}: {', '.join(changes)} (IOU={best_iou:.3f})")
+                        else:
+                            print(f"[ContinuousTracking]   - Shape {best_match_idx}: '{best_match_label}' -> '{target_new_label}' (IOU={best_iou:.3f})")
+                        
+                        # Create change command based on mode
+                        if self.dual_label_mode:
+                            # Dual label mode - check which labels need to be changed
+                            old_label1_target = shapes_in_target[best_match_idx].get('label', '')
+                            old_label2_target = shapes_in_target[best_match_idx].get('label2', '')
+                            
+                            # Determine new values for each label
+                            new_label1_target = new_label1 if self.change_label1_enabled else old_label1_target
+                            new_label2_target = new_label2 if self.change_label2_enabled else old_label2_target
+                            
+                            # Create dual label command with both changes
+                            change_cmd = ChangeDualLabelCommand(target_file, best_match_idx, 
+                                                               old_label1_target, new_label1_target,  # label1 change
+                                                               old_label2_target, new_label2_target,  # label2 change
+                                                               self.change_label1_enabled, self.change_label2_enabled)
+                        else:
+                            # Single label mode
+                            change_cmd = ChangeLabelCommand(target_file, best_match_idx, best_match_label, target_new_label, direct_file_edit=True)
                         change_commands.append(change_cmd)
                         
                         # Update tracking for next frame
@@ -3163,10 +3517,13 @@ class MainWindow(QMainWindow, WindowMixin):
             
             # Execute as composite command
             if len(change_commands) > 1:
-                composite_cmd = CompositeCommand(
-                    change_commands,
-                    f"Propagate label change '{old_label}' to '{new_label}' ({len(change_commands)} frames)"
-                )
+                # Create description based on what's being changed
+                if self.dual_label_mode and self.change_label2_enabled and new_label2 != old_label2:
+                    desc = f"Propagate ID change '{old_label2}' to '{new_label2}' ({len(change_commands)} frames)"
+                else:
+                    desc = f"Propagate label change '{old_label1}' to '{new_label1}' ({len(change_commands)} frames)"
+                
+                composite_cmd = CompositeCommand(change_commands, desc)
                 result = self.undo_manager.execute_command(composite_cmd)
             else:
                 # Just single frame
@@ -3324,6 +3681,97 @@ class MainWindow(QMainWindow, WindowMixin):
         self._restore_state(current_state)
         
         print(f"[{prefix}] Propagated to {frames_processed} subsequent frames")
+        return frames_processed
+    
+    def _propagate_label2_to_subsequent_frames_multi(self, source_shape, new_label2, prefix="Propagate"):
+        """後続フレームにlabel2を伝播させる（マルチフレーム操作用）"""
+        # 現在の状態を保存
+        current_state = {
+            'frame_idx': self.cur_img_idx,
+            'dirty': self.dirty,
+            'file_path': self.file_path
+        }
+        
+        prev_shape = source_shape.copy()
+        frame_idx = current_state['frame_idx'] + 1
+        frames_processed = 0
+        
+        # 画像サイズを取得
+        image_size = None
+        if hasattr(self, 'image') and self.image and not self.image.isNull():
+            image_size = self.image.size()
+        
+        # プログレスダイアログを作成
+        progress = QProgressDialog("連続ID変更処理中...", "キャンセル", 0,
+                                  self.img_count - frame_idx, self)
+        progress.setWindowTitle("処理中")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        
+        while frame_idx < self.img_count:
+            # キャンセルチェック
+            if progress.wasCanceled():
+                print(f"[{prefix}] Cancelled by user at frame {frame_idx}")
+                break
+            
+            # プログレス更新
+            progress.setValue(frame_idx - current_state['frame_idx'])
+            progress.setLabelText(f"処理中: フレーム {frame_idx + 1}/{self.img_count}")
+            QApplication.processEvents()
+            
+            # 次のフレームのアノテーションを読み込む
+            next_file = self.m_img_list[frame_idx]
+            annotation_paths = self._get_annotation_paths(next_file)
+            shapes_data = self._load_annotation_shapes_with_size(annotation_paths, next_file, image_size)
+            
+            if not shapes_data:
+                print(f"[{prefix}] No annotation found at frame {frame_idx}, stopping")
+                break
+            
+            # マッチする形状を探す (IOU based)
+            best_match_idx, best_iou = self._find_best_match(shapes_data, prev_shape)
+            
+            if best_match_idx >= 0:
+                # Get current label2 (if it exists)
+                current_label2 = shapes_data[best_match_idx][5] if len(shapes_data[best_match_idx]) > 5 else ""
+                
+                # 既に同じIDの場合は停止
+                if current_label2 == new_label2:
+                    print(f"[{prefix}] Already has ID '{new_label2}' at frame {frame_idx}, stopping")
+                    break
+                
+                # label2を更新
+                print(f"[{prefix}] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current ID: {current_label2})")
+                shapes_data[best_match_idx] = self._update_shape_label2(shapes_data[best_match_idx], new_label2)
+                
+                # アノテーションを保存
+                if self._save_propagated_annotation_with_size(annotation_paths, shapes_data, next_file, image_size):
+                    
+                    # 次の反復用にprev_shapeを更新
+                    points = shapes_data[best_match_idx][1]
+                    prev_shape = Shape(label=shapes_data[best_match_idx][0])
+                    if hasattr(prev_shape, 'label2'):
+                        prev_shape.label2 = new_label2
+                    for x, y in points:
+                        prev_shape.add_point(QPointF(x, y))
+                    prev_shape.close()
+                    frames_processed += 1
+                else:
+                    print(f"[{prefix}] Failed to save annotation at frame {frame_idx}")
+                    break
+            else:
+                print(f"[{prefix}] No matching shape found at frame {frame_idx}, stopping")
+                break
+            
+            frame_idx += 1
+        
+        progress.close()
+        
+        # 状態を復元
+        self._restore_state(current_state)
+        
+        print(f"[{prefix}] Propagated label2 to {frames_processed} subsequent frames")
         return frames_processed
     
     def propagate_label_to_subsequent_frames(self, source_shape):
@@ -3608,6 +4056,17 @@ class MainWindow(QMainWindow, WindowMixin):
         """Update shape data with new label."""
         # shape_data is (label, points, line_color, fill_color, difficult)
         return (new_label, shape_data[1], shape_data[2], shape_data[3], shape_data[4])
+    
+    def _update_shape_label2(self, shape_data, new_label2):
+        """Update shape data with new label2."""
+        # shape_data can be (label, points, line_color, fill_color, difficult) or
+        # (label, points, line_color, fill_color, difficult, label2)
+        if len(shape_data) >= 6:
+            # Has label2, update it
+            return (shape_data[0], shape_data[1], shape_data[2], shape_data[3], shape_data[4], new_label2)
+        else:
+            # Add label2
+            return (shape_data[0], shape_data[1], shape_data[2], shape_data[3], shape_data[4], new_label2)
     
     def _create_shapes_from_data(self, shapes_data):
         """Create Shape objects from shape data."""

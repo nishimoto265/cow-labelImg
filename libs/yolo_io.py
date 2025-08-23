@@ -40,20 +40,28 @@ class YOLOWriter:
 
         # PR387
         box_name = box['name']
+        
+        # Handle mixed format like "94 | stand" - extract only the first part (label1)
+        if ' | ' in box_name:
+            parts = box_name.split(' | ')
+            box_name = parts[0]  # Use only the cow ID part
+            # The second part should be handled as label2
+            if len(parts) > 1 and 'name2' not in box:
+                box['name2'] = parts[1]
+        
         if box_name not in class_list:
             class_list.append(box_name)
 
         class_index = class_list.index(box_name)
         
-        # Handle second label
-        class_index2 = -1
+        # Handle second label - return label name directly instead of index
+        label2 = ""
         if 'name2' in box and box['name2']:
-            box_name2 = box['name2']
-            if box_name2 not in class_list2:
-                class_list2.append(box_name2)
-            class_index2 = class_list2.index(box_name2)
+            label2 = box['name2']
+            if label2 not in class_list2:
+                class_list2.append(label2)
 
-        return class_index, class_index2, x_center, y_center, w, h
+        return class_index, label2, x_center, y_center, w, h
 
     def save(self, class_list=[], class_list2=[], target_file=None):
 
@@ -82,12 +90,12 @@ class YOLOWriter:
 
 
         for box in self.box_list:
-            class_index, class_index2, x_center, y_center, w, h = self.bnd_box_to_yolo_line(box, class_list, class_list2)
-            # Dual label format: class1 class2 x_center y_center w h
-            if class_index2 >= 0:
-                out_file.write("%d %d %.6f %.6f %.6f %.6f\n" % (class_index, class_index2, x_center, y_center, w, h))
+            class_index, label2, x_center, y_center, w, h = self.bnd_box_to_yolo_line(box, class_list, class_list2)
+            # New dual label format: class1 x_center y_center w h label2_name
+            if label2:
+                out_file.write("%d %.6f %.6f %.6f %.6f %s\n" % (class_index, x_center, y_center, w, h, label2))
             else:
-                # Backward compatibility: single label format
+                # Backward compatibility: single label format (no label2 at the end)
                 out_file.write("%d %.6f %.6f %.6f %.6f\n" % (class_index, x_center, y_center, w, h))
 
         # Save class lists
@@ -201,24 +209,35 @@ class YoloReader:
         for bndBox in bnd_box_file:
             parts = bndBox.strip().split(' ')
             
-            # Check if this is dual label format (6 values) or single label format (5 values)
-            if len(parts) == 6:
-                # Dual label format: class1 class2 x_center y_center w h
-                class_index1, class_index2, x_center, y_center, w, h = parts
-                label1, x_min, y_min, x_max, y_max = self.yolo_line_to_shape(class_index1, x_center, y_center, w, h)
-                
-                # Get label2 from classes2 list
-                class_idx2 = int(class_index2)
-                label2 = ""
-                if self.classes2 and 0 <= class_idx2 < len(self.classes2):
-                    label2 = self.classes2[class_idx2]
-                
-                # Caveat: difficult flag is discarded when saved as yolo format.
-                self.add_shape(label1, x_min, y_min, x_max, y_max, False, label2)
+            # Check if this is new dual label format (6 or more values with label2 at the end)
+            if len(parts) >= 6:
+                try:
+                    # New format: class1 x_center y_center w h label2_name
+                    class_index1 = parts[0]
+                    x_center = parts[1]
+                    y_center = parts[2]
+                    w = parts[3]
+                    h = parts[4]
+                    # Label2 could contain spaces, so join all remaining parts
+                    label2 = ' '.join(parts[5:])
+                    
+                    # Parse coordinates first
+                    label1, x_min, y_min, x_max, y_max = self.yolo_line_to_shape(class_index1, x_center, y_center, w, h)
+                    
+                    # Label2 is already a string (not an index)
+                    # Caveat: difficult flag is discarded when saved as yolo format.
+                    self.add_shape(label1, x_min, y_min, x_max, y_max, False, label2)
+                except (ValueError, IndexError) as e:
+                    # If parsing fails, skip this line
+                    print(f"Warning: Could not parse YOLO line: {bndBox.strip()} - {e}")
+                    
             elif len(parts) == 5:
                 # Single label format: class x_center y_center w h
-                class_index, x_center, y_center, w, h = parts
-                label, x_min, y_min, x_max, y_max = self.yolo_line_to_shape(class_index, x_center, y_center, w, h)
-                
-                # Caveat: difficult flag is discarded when saved as yolo format.
-                self.add_shape(label, x_min, y_min, x_max, y_max, False)
+                try:
+                    class_index, x_center, y_center, w, h = parts
+                    label, x_min, y_min, x_max, y_max = self.yolo_line_to_shape(class_index, x_center, y_center, w, h)
+                    
+                    # Caveat: difficult flag is discarded when saved as yolo format.
+                    self.add_shape(label, x_min, y_min, x_max, y_max, False)
+                except (ValueError, IndexError) as e:
+                    print(f"Warning: Could not parse YOLO line: {bndBox.strip()} - {e}")
