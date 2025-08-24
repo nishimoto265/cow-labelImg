@@ -134,22 +134,32 @@ class YoloReader:
 
         # print (file_path, self.class_list_path)
 
-        # Read main class list
-        classes_file = open(self.class_list_path, 'r')
-        self.classes = classes_file.read().strip('\n').split('\n')
-        classes_file.close()
-        
-        # Read class list 1 and 2 if they exist
-        self.classes1 = self.classes  # Default to main classes
+        # Read class lists - handle both single and dual label modes
+        self.classes = []
+        self.classes1 = []
         self.classes2 = []
         
+        # Try to read classes.txt first (backward compatibility)
+        if os.path.exists(self.class_list_path):
+            with open(self.class_list_path, 'r') as f:
+                self.classes = f.read().strip('\n').split('\n')
+                self.classes1 = self.classes  # Default to main classes
+        
+        # Read class list 1 and 2 for dual label mode
         if os.path.exists(self.class_list1_path):
             with open(self.class_list1_path, 'r') as f:
                 self.classes1 = f.read().strip('\n').split('\n')
+                # If classes.txt doesn't exist, use classes1 as default
+                if not self.classes:
+                    self.classes = self.classes1
         
         if os.path.exists(self.class_list2_path):
             with open(self.class_list2_path, 'r') as f:
                 self.classes2 = f.read().strip('\n').split('\n')
+        
+        # If no class files found, raise error
+        if not self.classes and not self.classes1:
+            raise FileNotFoundError(f"No class definition files found. Looking for {self.class_list_path} or {self.class_list1_path}")
 
         # print (self.classes)
 
