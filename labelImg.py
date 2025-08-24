@@ -150,6 +150,8 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Initialize tracking
         self.continuous_tracking_mode = False
+        self.tracking_mode = "IOU"  # Default to IOU tracking
+        self.max_tracking_frames = 100  # Default max frames
         self.tracker = Tracker()
         self.prev_frame_shapes = []
         
@@ -240,11 +242,51 @@ class MainWindow(QMainWindow, WindowMixin):
         list_layout.addWidget(self.diffc_button)
         list_layout.addWidget(default_labels_container)
         
-        # Create continuous tracking checkbox
-        self.continuous_tracking_checkbox = QCheckBox("連続ID付けモード")
+        # Create continuous tracking section
+        tracking_container = QGroupBox("連続ID付けモード")
+        tracking_layout = QVBoxLayout()
+        tracking_layout.setContentsMargins(10, 5, 10, 5)
+        
+        # Enable checkbox
+        self.continuous_tracking_checkbox = QCheckBox("有効")
         self.continuous_tracking_checkbox.setChecked(False)
         self.continuous_tracking_checkbox.stateChanged.connect(self.toggle_continuous_tracking)
-        list_layout.addWidget(self.continuous_tracking_checkbox)
+        tracking_layout.addWidget(self.continuous_tracking_checkbox)
+        
+        # Tracking mode selection
+        mode_layout = QHBoxLayout()
+        mode_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+        
+        self.tracking_mode_group = QButtonGroup()
+        self.tracking_mode_iou = QRadioButton("IOU追跡")
+        self.tracking_mode_iou.setChecked(True)
+        self.tracking_mode_id = QRadioButton("ID追跡")
+        
+        self.tracking_mode_group.addButton(self.tracking_mode_iou, 0)
+        self.tracking_mode_group.addButton(self.tracking_mode_id, 1)
+        self.tracking_mode_group.buttonClicked.connect(self.on_tracking_mode_changed)
+        
+        mode_layout.addWidget(self.tracking_mode_iou)
+        mode_layout.addWidget(self.tracking_mode_id)
+        tracking_layout.addLayout(mode_layout)
+        
+        # Max frames setting
+        frames_layout = QHBoxLayout()
+        frames_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+        frames_label = QLabel("最大フレーム数:")
+        self.max_tracking_frames_spinbox = QSpinBox()
+        self.max_tracking_frames_spinbox.setMinimum(1)
+        self.max_tracking_frames_spinbox.setMaximum(1000)
+        self.max_tracking_frames_spinbox.setValue(100)
+        self.max_tracking_frames_spinbox.valueChanged.connect(self.on_max_frames_changed)
+        
+        frames_layout.addWidget(frames_label)
+        frames_layout.addWidget(self.max_tracking_frames_spinbox)
+        frames_layout.addStretch()
+        tracking_layout.addLayout(frames_layout)
+        
+        tracking_container.setLayout(tracking_layout)
+        list_layout.addWidget(tracking_container)
         
         # Create click-to-change-label checkbox
         self.click_change_label_checkbox = QCheckBox("クリックでラベル変更")
@@ -809,6 +851,19 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.default_label = default_label1
             if default_label2:
                 self.default_label2 = default_label2
+            
+            # 連続ID付けモード設定を復元
+            tracking_mode = settings.get('TRACKING_MODE', 'IOU')
+            if tracking_mode == 'ID':
+                self.tracking_mode_id.setChecked(True)
+                self.tracking_mode = 'ID'
+            else:
+                self.tracking_mode_iou.setChecked(True)
+                self.tracking_mode = 'IOU'
+            
+            max_frames = settings.get('MAX_TRACKING_FRAMES', 100)
+            self.max_tracking_frames_spinbox.setValue(max_frames)
+            self.max_tracking_frames = max_frames
 
         # Populate the File menu dynamically.
         self.update_file_menu()
@@ -2072,6 +2127,10 @@ class MainWindow(QMainWindow, WindowMixin):
         settings['DEFAULT_LABEL1'] = self.default_label
         settings['DEFAULT_LABEL2'] = self.default_label2
         
+        # 連続ID付けモード設定を保存
+        settings['TRACKING_MODE'] = self.tracking_mode
+        settings['MAX_TRACKING_FRAMES'] = self.max_tracking_frames
+        
         settings.save()
 
     def load_recent(self, filename):
@@ -2639,6 +2698,17 @@ class MainWindow(QMainWindow, WindowMixin):
         """Toggle click-to-change-label mode."""
         self.click_change_label_mode = (state == Qt.Checked)
     
+    def on_tracking_mode_changed(self, button):
+        """Handle tracking mode change (IOU/ID)."""
+        mode = self.tracking_mode_group.checkedId()
+        self.tracking_mode = "IOU" if mode == 0 else "ID"
+        print(f"[Tracking] Mode changed to: {self.tracking_mode}")
+    
+    def on_max_frames_changed(self, value):
+        """Handle max frames value change."""
+        self.max_tracking_frames = value
+        print(f"[Tracking] Max frames set to: {value}")
+    
     def on_change_label1_toggled(self, state):
         """Toggle label 1 change mode."""
         self.change_label1_enabled = (state == Qt.Checked)
@@ -2729,6 +2799,28 @@ class MainWindow(QMainWindow, WindowMixin):
             self.current_quick_id = id_str
             self.quick_id_selector.set_current_id(id_str)
             self.update_current_id_display()
+            
+            # Get the actual class names for this quick ID
+            class_name1 = ""
+            class_name2 = ""
+            try:
+                id_num = int(id_str)
+                if 1 <= id_num <= len(self.label_hist):
+                    class_name1 = self.label_hist[id_num - 1]
+                if 1 <= id_num <= len(self.label_hist2):
+                    class_name2 = self.label_hist2[id_num - 1]
+            except (ValueError, IndexError):
+                pass
+            
+            # Update current_label1 and current_label2
+            if class_name1:
+                self.current_label1 = class_name1
+                self.default_label = class_name1
+                print(f"[QuickID] Updated current_label1: {class_name1}")
+            if class_name2:
+                self.current_label2 = class_name2
+                print(f"[QuickID] Updated current_label2: {class_name2}")
+            
             self.apply_quick_id_to_selected_shape()
     
     def next_quick_id(self):
@@ -2747,29 +2839,35 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def on_quick_label1_selected(self, class_name):
         """Quick ID SelectorからのLabel1シグナルを受信"""
-        # デフォルトラベル1を更新
-        if hasattr(self, 'use_default_label_checkbox1') and self.use_default_label_checkbox1.isChecked():
-            # コンボボックスでクラスを選択
-            if hasattr(self, 'default_label1_combo_box'):
-                index = self.default_label1_combo_box.cb.findText(class_name)
-                if index >= 0:
-                    self.default_label1_combo_box.cb.setCurrentIndex(index)
-                    self.default_label = class_name
-        
         print(f"[QuickID] Label1 selected from selector: {class_name}")
+        
+        # current_label1を更新（これが実際に使用される値）
+        self.current_label1 = class_name
+        
+        # デフォルトラベル1も更新
+        self.default_label = class_name
+        
+        # use_default_dual_labelsがチェックされている場合、コンボボックスも更新
+        if hasattr(self, 'default_label1_combo_box'):
+            index = self.default_label1_combo_box.cb.findText(class_name)
+            if index >= 0:
+                self.default_label1_combo_box.cb.setCurrentIndex(index)
     
     def on_quick_label2_selected(self, class_name):
         """Quick ID SelectorからのLabel2シグナルを受信"""
-        # デフォルトラベル2を更新
-        if hasattr(self, 'use_default_label_checkbox2') and self.use_default_label_checkbox2.isChecked():
-            # コンボボックスでクラスを選択
-            if hasattr(self, 'default_label2_combo_box'):
-                index = self.default_label2_combo_box.cb.findText(class_name)
-                if index >= 0:
-                    self.default_label2_combo_box.cb.setCurrentIndex(index)
-                    self.default_label2 = class_name
-        
         print(f"[QuickID] Label2 selected from selector: {class_name}")
+        
+        # current_label2を更新（これが実際に使用される値）
+        self.current_label2 = class_name
+        
+        # デフォルトラベル2も更新
+        self.default_label2 = class_name
+        
+        # コンボボックスも更新
+        if hasattr(self, 'default_label2_combo_box'):
+            index = self.default_label2_combo_box.cb.findText(class_name)
+            if index >= 0:
+                self.default_label2_combo_box.cb.setCurrentIndex(index)
     
     def on_quick_id_selected(self, id_str):
         """Quick ID Selectorからのシグナルを受信（旧互換性）"""
@@ -2805,27 +2903,61 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.canvas.selected_shape:
             shape = self.canvas.selected_shape
             
-            # In dual label mode, Quick ID should update label2 (ID field)
+            # In dual label mode, update based on which labels are enabled for change
             if self.dual_label_mode:
-                # Quick IDはIDフィールド（label2）を更新する
-                new_id = f"ID-{self.current_quick_id.zfill(3)}"  # Format as ID-001, ID-002, etc.
-                old_id = shape.label2 if hasattr(shape, 'label2') else ""
+                # Get the actual label values for this quick ID
+                try:
+                    id_num = int(self.current_quick_id)
+                    new_label1 = self.label_hist[id_num - 1] if 1 <= id_num <= len(self.label_hist) else ""
+                    new_label2 = self.label_hist2[id_num - 1] if 1 <= id_num <= len(self.label_hist2) else ""
+                except (ValueError, IndexError):
+                    new_label1 = ""
+                    new_label2 = ""
                 
-                if old_id != new_id:
+                old_label1 = shape.label if hasattr(shape, 'label') else ""
+                old_label2 = shape.label2 if hasattr(shape, 'label2') else ""
+                
+                # Apply labels based on which checkboxes are enabled
+                label1_changed = False
+                label2_changed = False
+                
+                if self.change_label1_enabled and new_label1 and old_label1 != new_label1:
+                    label1_changed = True
+                
+                if self.change_label2_enabled and new_label2 and old_label2 != new_label2:
+                    label2_changed = True
+                
+                if label1_changed or label2_changed:
                     # 連続ID付けモードの場合はマルチフレーム操作として処理
                     if self.continuous_tracking_mode:
-                        print(f"[QuickID] Starting continuous ID assignment: {old_id} -> {new_id}")
-                        # マルチフレーム操作として処理
-                        self.apply_quick_id_with_propagation_label2(shape, new_id, old_id)
+                        print(f"[QuickID] Starting continuous tracking with Quick ID")
+                        # Create the appropriate label change and propagate
+                        if label1_changed and label2_changed:
+                            # Both labels changed
+                            self.propagate_dual_label_change(shape, new_label1, old_label1, new_label2, old_label2)
+                        elif label1_changed:
+                            # Only label1 changed
+                            self.propagate_label_change(shape, new_label1, old_label1, is_label2=False)
+                        else:
+                            # Only label2 changed
+                            self.propagate_label_change(shape, new_label2, old_label2, is_label2=True)
                     else:
                         # 通常モード: 単一フレームの変更のみ
-                        shape.label2 = new_id
+                        if label1_changed:
+                            shape.label = new_label1
+                        if label2_changed:
+                            shape.label2 = new_label2
                         
                         # Update shape colors based on current color mode
                         self.update_shape_color(shape)
                         
                         # Update display text to show both labels
-                        display_text = f"{shape.label} | {new_id}" if shape.label else new_id
+                        if self.dual_label_mode:
+                            label1 = shape.label if hasattr(shape, 'label') else ""
+                            label2 = shape.label2 if hasattr(shape, 'label2') else ""
+                            display_text = f"{label1} | {label2}" if label1 and label2 else label1 or label2
+                        else:
+                            display_text = shape.label
                         
                         # リストアイテムも更新
                         if shape in self.shapes_to_items:
@@ -2843,7 +2975,10 @@ class MainWindow(QMainWindow, WindowMixin):
                         self.set_dirty()
                         self.update_combo_box()
                         
-                        print(f"[QuickID] Applied ID {new_id} to shape label2")
+                        if label1_changed:
+                            print(f"[QuickID] Applied label1 {new_label1} to shape")
+                        if label2_changed:
+                            print(f"[QuickID] Applied label2 {new_label2} to shape")
             else:
                 # Original behavior for single label mode
                 # Quick IDに対応する実際のクラス名を取得（IDサフィックスなし）
@@ -3343,9 +3478,10 @@ class MainWindow(QMainWindow, WindowMixin):
             self._applying_label = False
             return
         
-        # If continuous tracking mode is ON, propagate label using IOU tracking
+        # If continuous tracking mode is ON, propagate label using selected tracking mode
         if self.continuous_tracking_mode:
-            print(f"[ContinuousTracking] Starting IOU-based label propagation: '{old_label1}' -> '{new_label1}'")
+            tracking_mode_text = "IOU-based" if self.tracking_mode == "IOU" else "ID-based"
+            print(f"[ContinuousTracking] Starting {tracking_mode_text} label propagation: '{old_label1}' -> '{new_label1}'")
             
             # Create progress dialog
             from PyQt5.QtWidgets import QProgressDialog, QApplication
@@ -3354,7 +3490,8 @@ class MainWindow(QMainWindow, WindowMixin):
             current_file = self.file_path
             current_idx = self.cur_img_idx
             
-            num_frames = min(self.img_count - current_idx - 1, 100)  # Limit to 100 frames
+            # Use user-defined max frames
+            num_frames = min(self.img_count - current_idx - 1, self.max_tracking_frames)
             progress = QProgressDialog("連続ID変更処理中...", "キャンセル", 0, num_frames, self)
             progress.setWindowTitle("処理中")
             progress.setWindowModality(Qt.WindowModal)
@@ -3416,24 +3553,38 @@ class MainWindow(QMainWindow, WindowMixin):
                     shapes_in_target = self.load_shapes_from_annotation_file(annotation_path, target_file)
                     print(f"[ContinuousTracking] Found {len(shapes_in_target)} shapes in frame {target_idx}")
                     
-                    # Find best matching shape using IOU (regardless of current label)
+                    # Find matching shape based on tracking mode
                     best_match_idx = -1
                     best_iou = 0.0
                     best_match_label = None
                     
-                    for idx, target_shape_data in enumerate(shapes_in_target):
-                        target_points = target_shape_data.get('points', [])
-                        shape_label = target_shape_data.get('label')
+                    if self.tracking_mode == "ID":
+                        # ID tracking mode - find shape with matching Label1
+                        target_id = old_label1 if self.change_label1_enabled else new_label1
+                        print(f"[ContinuousTracking] ID mode: searching for ID '{target_id}'")
                         
-                        # Debug: Print first point of each shape to see coordinate ranges
-                        if idx == 0 and len(target_points) > 0 and len(prev_shape_points) > 0:
-                            print(f"[DEBUG] Prev shape first point: {prev_shape_points[0]}")
-                            print(f"[DEBUG] Target shape first point: {target_points[0]}")
-                        
-                        # Calculate IOU regardless of label
-                        if len(target_points) == 4 and len(prev_shape_points) == 4:
-                            iou = self.calculate_iou(prev_shape_points, target_points)
-                            print(f"[ContinuousTracking] Shape {idx} (label='{shape_label}'): IOU={iou:.3f}")
+                        for idx, target_shape_data in enumerate(shapes_in_target):
+                            shape_label = target_shape_data.get('label')
+                            if shape_label == target_id:
+                                best_match_idx = idx
+                                best_match_label = shape_label
+                                print(f"[ContinuousTracking] Found matching ID at shape {idx}")
+                                break
+                    else:
+                        # IOU tracking mode - find shape with best overlap
+                        for idx, target_shape_data in enumerate(shapes_in_target):
+                            target_points = target_shape_data.get('points', [])
+                            shape_label = target_shape_data.get('label')
+                            
+                            # Debug: Print first point of each shape to see coordinate ranges
+                            if idx == 0 and len(target_points) > 0 and len(prev_shape_points) > 0:
+                                print(f"[DEBUG] Prev shape first point: {prev_shape_points[0]}")
+                                print(f"[DEBUG] Target shape first point: {target_points[0]}")
+                            
+                            # Calculate IOU regardless of label
+                            if len(target_points) == 4 and len(prev_shape_points) == 4:
+                                iou = self.calculate_iou(prev_shape_points, target_points)
+                                print(f"[ContinuousTracking] Shape {idx} (label='{shape_label}'): IOU={iou:.3f}")
                             
                             # Use IOU threshold of 0.4 as per specification
                             if iou > best_iou and iou >= 0.4:
@@ -3773,6 +3924,24 @@ class MainWindow(QMainWindow, WindowMixin):
         
         print(f"[{prefix}] Propagated label2 to {frames_processed} subsequent frames")
         return frames_processed
+    
+    def propagate_label_change(self, shape, new_label, old_label, is_label2=False):
+        """Helper method to propagate a single label change."""
+        if is_label2:
+            shape.label2 = new_label
+            # Propagate label2 to subsequent frames
+            self.propagate_label_to_subsequent_frames(shape)
+        else:
+            shape.label = new_label
+            # Propagate label1 to subsequent frames
+            self.propagate_label_to_subsequent_frames(shape)
+    
+    def propagate_dual_label_change(self, shape, new_label1, old_label1, new_label2, old_label2):
+        """Helper method to propagate both label changes."""
+        shape.label = new_label1
+        shape.label2 = new_label2
+        # Propagate both labels to subsequent frames
+        self.propagate_label_to_subsequent_frames(shape)
     
     def propagate_label_to_subsequent_frames(self, source_shape):
         """Propagate label changes to subsequent frames until tracking fails."""
