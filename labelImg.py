@@ -3707,19 +3707,51 @@ class MainWindow(QMainWindow, WindowMixin):
                 else:
                     desc = f"Propagate label change '{old_label1}' to '{new_label1}' ({len(change_commands)} frames)"
                 
+                # Show a quick status message instead of blocking UI
+                self.statusBar().showMessage(f"変更を適用中... ({len(change_commands)} フレーム)", 1000)
+                QApplication.processEvents()  # Update UI once
+                
                 composite_cmd = CompositeCommand(change_commands, desc)
                 result = self.undo_manager.execute_command(composite_cmd)
                 
-                # Reload current frame to update UI after batch processing
-                if result:
-                    # Reload annotation for current frame to reflect changes
-                    self.load_file(self.file_path, preserve_zoom=True)
+                # Clear status message
+                self.statusBar().showMessage(f"ID連続変更が完了しました ({len(change_commands)} フレーム)", 3000)
+                
+                # Update UI for current frame only (no need to reload entire file)
+                if result and shape_index < len(self.canvas.shapes):
+                    # Update the shape's labels directly
+                    shape = self.canvas.shapes[shape_index]
+                    if self.dual_label_mode:
+                        if self.change_label1_enabled:
+                            shape.label1 = new_label1
+                            shape.label = new_label1
+                        if self.change_label2_enabled:
+                            shape.label2 = new_label2
+                    else:
+                        shape.label = new_label1
+                        shape.label1 = new_label1
+                    
+                    # Update colors and UI
+                    self.update_shape_color(shape)
+                    
+                    # Update label list item
+                    if item:
+                        text_parts = []
+                        if hasattr(shape, 'label1') and shape.label1:
+                            text_parts.append(shape.label1)
+                        if hasattr(shape, 'label2') and shape.label2:
+                            text_parts.append(shape.label2)
+                        text = " | ".join(text_parts) if len(text_parts) > 1 else (text_parts[0] if text_parts else "")
+                        item.setText(text)
+                        color_label = self.get_color_label_for_shape(shape)
+                        item.setBackground(generate_color_by_text(color_label))
+                    
+                    # Refresh canvas
+                    self.canvas.update()
+                    self.set_dirty()
             else:
                 # Just single frame
                 result = self.undo_manager.execute_command(change_commands[0])
-                # Reload current frame to update UI
-                if result:
-                    self.load_file(self.file_path, preserve_zoom=True)
             
         else:
             # Normal single-frame operation - use Command pattern
