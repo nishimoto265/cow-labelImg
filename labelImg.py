@@ -195,7 +195,7 @@ class MainWindow(QMainWindow, WindowMixin):
         default_labels_container = QGroupBox("指定したラベルを使う")
         default_labels_layout = QVBoxLayout()
         default_labels_layout.setContentsMargins(10, 5, 10, 5)
-        default_labels_layout.setSpacing(2)  # Reduce spacing between label rows
+        default_labels_layout.setSpacing(0)  # Minimize spacing between label rows
         
         # Checkbox to enable default labels
         use_default_layout = QHBoxLayout()
@@ -420,18 +420,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.combo_box = ComboBox(self)
         list_layout.addWidget(self.combo_box)
 
-        # Create and add a widget for showing current label items
-        self.label_list = QListWidget()
-        label_list_container = QWidget()
-        label_list_container.setLayout(list_layout)
-        self.label_list.itemActivated.connect(self.label_selection_changed)
-        self.label_list.itemSelectionChanged.connect(self.label_selection_changed)
-        self.label_list.itemDoubleClicked.connect(self.edit_label)
-        # Connect to itemChanged to detect checkbox changes.
-        self.label_list.itemChanged.connect(self.label_item_changed)
-        list_layout.addWidget(self.label_list)
-        
-        # 描画選択パネルを追加
+        # 描画選択パネルを追加（BB一覧の前に配置）
         draw_options_group = QGroupBox("描画オプション")
         draw_options_layout = QVBoxLayout()
         
@@ -450,11 +439,31 @@ class MainWindow(QMainWindow, WindowMixin):
         draw_options_group.setLayout(draw_options_layout)
         list_layout.addWidget(draw_options_group)
 
+        # Create and add a widget for showing current label items
+        self.label_list = QListWidget()
+        self.label_list.itemActivated.connect(self.label_selection_changed)
+        self.label_list.itemSelectionChanged.connect(self.label_selection_changed)
+        self.label_list.itemDoubleClicked.connect(self.edit_label)
+        # Connect to itemChanged to detect checkbox changes.
+        self.label_list.itemChanged.connect(self.label_item_changed)
+        list_layout.addWidget(self.label_list)
 
+        # Create a scrollable container for the right panel
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        # Create widget to hold all controls
+        label_list_container = QWidget()
+        label_list_container.setLayout(list_layout)
+        
+        # Set the widget in scroll area
+        scroll_area.setWidget(label_list_container)
 
         self.dock = QDockWidget(get_str('boxLabelText'), self)
         self.dock.setObjectName(get_str('labels'))
-        self.dock.setWidget(label_list_container)
+        self.dock.setWidget(scroll_area)
 
         self.file_list_widget = QListWidget()
         self.file_list_widget.itemDoubleClicked.connect(self.file_item_double_clicked)
