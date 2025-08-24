@@ -3653,7 +3653,8 @@ class MainWindow(QMainWindow, WindowMixin):
                             change_cmd = ChangeDualLabelCommand(target_file, best_match_idx, 
                                                                old_label1_target, new_label1_target,  # label1 change
                                                                old_label2_target, new_label2_target,  # label2 change
-                                                               self.change_label1_enabled, self.change_label2_enabled)
+                                                               self.change_label1_enabled, self.change_label2_enabled,
+                                                               direct_file_edit=True)  # Don't load frames during batch processing
                         else:
                             # Single label mode
                             change_cmd = ChangeLabelCommand(target_file, best_match_idx, best_match_label, target_new_label, direct_file_edit=True)
