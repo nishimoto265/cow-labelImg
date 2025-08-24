@@ -7,12 +7,7 @@ import platform
 import shutil
 import sys
 import webbrowser as wb
-import logging
 from functools import partial
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 try:
     from PyQt5.QtGui import *
@@ -84,31 +79,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def __init__(self, default_filename=None, default_prefdef_class_file=None, default_save_dir=None):
         super(MainWindow, self).__init__()
-        
-        # Store parameters for use in initialization methods
-        self.default_filename_param = default_filename
-        self.default_prefdef_class_file_param = default_prefdef_class_file
-        self.default_save_dir_param = default_save_dir
-        
-        # Initialize components in logical order
-        self._init_basic_settings()
-        self._init_labels_and_dialogs()
-        self._init_tracking_and_modes()
-        self._init_managers_and_tools()
-        self._init_ui_components()
-        self._init_canvas()
-        self._init_actions()
-        self._init_menus()
-        self._init_toolbar()
-        self._init_dock_widgets()
-        self._restore_session()
-        
-        # Load initial file if provided
-        if self.default_filename_param:
-            self.load_file(self.default_filename_param)
-    
-    def _init_basic_settings(self):
-        """Initialize basic settings and configurations."""
         self.setWindowTitle(__appname__)
 
         # Load setting in the main thread
@@ -151,7 +121,7 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.label_hist:
             self.default_label = self.label_hist[0]
         else:
-            logger.info("Not find:/data/predefined_classes.txt (optional)")
+            print("Not find:/data/predefined_classes.txt (optional)")
         
         # Initialize default_label2
         if self.label2_hist:
@@ -1254,7 +1224,7 @@ class MainWindow(QMainWindow, WindowMixin):
             else:  # User probably changed item visibility
                 self.canvas.set_shape_visible(shape, item.checkState() == Qt.Checked)
         except AttributeError as e:
-            pass  # Silently ignore item state update errors
+            print(f"[DEBUG] Error updating item state: {e}")
 
     # React to canvas signals.
     def shape_selection_changed(self, selected=False):
@@ -1267,7 +1237,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 if shape in self.shapes_to_items:
                     self.shapes_to_items[shape].setSelected(True)
                 else:
-                    logger.warning(f" Selected shape not found in shapes_to_items dictionary")
+                    print(f"[Warning] Selected shape not found in shapes_to_items dictionary")
             else:
                 self.label_list.clearSelection()
         
@@ -1338,7 +1308,7 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Check if shape exists in dictionary
         if shape not in self.shapes_to_items:
-            logger.warning(f" Shape not found in shapes_to_items dictionary")
+            print(f"[Warning] Shape not found in shapes_to_items dictionary")
             return
             
         item = self.shapes_to_items[shape]
@@ -1624,7 +1594,6 @@ class MainWindow(QMainWindow, WindowMixin):
                         self.executed = False
                         return True
                     except Exception as e:
-                        logger.error(f"Failed to undo move shape: {e}")
                         return False
                 
                 def redo(self, app):
@@ -2248,6 +2217,7 @@ class MainWindow(QMainWindow, WindowMixin):
             filename = self.m_img_list[self.cur_img_idx]
             if filename:
                 # When going to previous frame, load with clear_prev_shapes=True and preserve_zoom=True
+                print(f"[Navigation] Going to previous frame {self.cur_img_idx}")
                 self.load_file(filename, clear_prev_shapes=True, preserve_zoom=True)
 
     def open_next_image(self, _value=False):
@@ -2477,6 +2447,7 @@ class MainWindow(QMainWindow, WindowMixin):
             classes1_file = os.path.join(os.path.dirname(__file__), 'data', 'predefined_classes1.txt')
         
         if os.path.exists(classes1_file):
+            print(f"Loading Label1 classes from: {classes1_file}")
             with codecs.open(classes1_file, 'r', 'utf8') as f:
                 for line in f:
                     line = line.strip()
@@ -2496,6 +2467,7 @@ class MainWindow(QMainWindow, WindowMixin):
             classes2_file = os.path.join(os.path.dirname(__file__), 'data', 'predefined_classes2.txt')
         
         if os.path.exists(classes2_file):
+            print(f"Loading Label2 classes from: {classes2_file}")
             with codecs.open(classes2_file, 'r', 'utf8') as f:
                 for line in f:
                     line = line.strip()
@@ -2506,11 +2478,14 @@ class MainWindow(QMainWindow, WindowMixin):
         if hasattr(self, 'default_label1_combo_box'):
             self.default_label1_combo_box.cb.clear()
             self.default_label1_combo_box.cb.addItems(self.label1_hist)
+            print(f"Updated Label1 combo box with {len(self.label1_hist)} items")
         
         if hasattr(self, 'default_label2_combo_box'):
             self.default_label2_combo_box.cb.clear()
             self.default_label2_combo_box.cb.addItems(self.label2_hist)
+            print(f"Updated Label2 combo box with {len(self.label2_hist)} items")
         
+        print(f"Loaded classes - Label1: {len(self.label1_hist)} items, Label2: {len(self.label2_hist)} items")
 
     def load_pascal_xml_by_filename(self, xml_path):
         if self.file_path is None:
@@ -2781,6 +2756,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     self.default_label1_combo_box.cb.setCurrentIndex(index)
                     self.default_label = class_name
         
+        print(f"[QuickID] Label1 selected from selector: {class_name}")
     
     def on_quick_label2_selected(self, class_name):
         """Quick ID SelectorからのLabel2シグナルを受信"""
@@ -2793,6 +2769,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     self.default_label2_combo_box.cb.setCurrentIndex(index)
                     self.default_label2 = class_name
         
+        print(f"[QuickID] Label2 selected from selector: {class_name}")
     
     def on_quick_id_selected(self, id_str):
         """Quick ID Selectorからのシグナルを受信（旧互換性）"""
@@ -2801,6 +2778,7 @@ class MainWindow(QMainWindow, WindowMixin):
         # ステータスバーの表示を更新
         self.update_current_id_display()
         
+        print(f"[QuickID] ID selected from selector: {id_str}")
         
         # デフォルトラベルコンボボックスも同期更新
         try:
@@ -2820,6 +2798,7 @@ class MainWindow(QMainWindow, WindowMixin):
             # 実際のクラス名を取得して表示
             class_name = self.get_class_name_for_quick_id(self.current_quick_id)
             self.label_current_id.setText(f'{class_name}')
+            print(f"[QuickID] Status bar updated: {class_name}")
     
     def apply_quick_id_to_selected_shape(self):
         """選択中のBBに現在のQuick IDを適用"""
@@ -2835,6 +2814,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 if old_id != new_id:
                     # 連続ID付けモードの場合はマルチフレーム操作として処理
                     if self.continuous_tracking_mode:
+                        print(f"[QuickID] Starting continuous ID assignment: {old_id} -> {new_id}")
                         # マルチフレーム操作として処理
                         self.apply_quick_id_with_propagation_label2(shape, new_id, old_id)
                     else:
@@ -2863,6 +2843,7 @@ class MainWindow(QMainWindow, WindowMixin):
                         self.set_dirty()
                         self.update_combo_box()
                         
+                        print(f"[QuickID] Applied ID {new_id} to shape label2")
             else:
                 # Original behavior for single label mode
                 # Quick IDに対応する実際のクラス名を取得（IDサフィックスなし）
@@ -2873,6 +2854,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 if old_label != new_label:
                     # 連続ID付けモードの場合はマルチフレーム操作として処理
                     if self.continuous_tracking_mode:
+                        print(f"[QuickID] Starting continuous ID assignment: {old_label} -> {new_label}")
                         
                         # マルチフレーム操作として処理
                         self.apply_quick_id_with_propagation(shape, new_label, old_label)
@@ -2901,7 +2883,9 @@ class MainWindow(QMainWindow, WindowMixin):
                         self.set_dirty()
                         self.update_combo_box()
                         
+                        print(f"[QuickID] Applied ID {self.current_quick_id} to shape: {old_label} -> {new_label}")
         else:
+            print("[QuickID] No shape selected for ID application")
     
     def apply_quick_id_with_propagation(self, shape, new_label, old_label):
         """連続ID付けモードでラベルを適用し、後続フレームに伝播させる（マルチフレーム操作）"""
@@ -2929,6 +2913,7 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.auto_saving.isChecked() and self.default_save_dir:
             self.save_file()
         
+        print(f"[QuickID] Applied to current frame: {old_label} -> {new_label}")
         
         # 後続フレームに伝播
         frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, new_label, "QuickID")
@@ -2973,6 +2958,7 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.auto_saving.isChecked() and self.default_save_dir:
             self.save_file()
         
+        print(f"[QuickID] Applied label2 to current frame: {old_id} -> {new_id}")
         
         # 後続フレームに伝播 - label2用の伝播関数を使用
         frames_processed = self._propagate_label2_to_subsequent_frames_multi(shape, new_id, "QuickID")
@@ -3095,11 +3081,11 @@ class MainWindow(QMainWindow, WindowMixin):
                     pass
                 else:
                     # If image can't be loaded, skip
-                    logger.warning(f" Could not load image for YOLO annotation: {image_path}")
+                    print(f"[Warning] Could not load image for YOLO annotation: {image_path}")
                     return shapes
                 
                 if img.isNull():
-                    logger.warning(f" Image is null for YOLO annotation: {image_path}")
+                    print(f"[Warning] Image is null for YOLO annotation: {image_path}")
                     return shapes
                     
                 # YoloReader expects the QImage object, not the shape
@@ -3140,11 +3126,11 @@ class MainWindow(QMainWindow, WindowMixin):
                             'fill_color': fill_color
                         }
                     else:
-                        logger.warning(f" Unknown shape format with {len(shape_item)} elements")
+                        print(f"[Warning] Unknown shape format with {len(shape_item)} elements")
                         continue
                     shapes.append(shape)
         except Exception as e:
-            logger.error(f"Error loading annotation file {annotation_path}: {e}")
+            print(f"Error loading annotation file {annotation_path}: {e}")
         
         return shapes
     
@@ -3153,6 +3139,8 @@ class MainWindow(QMainWindow, WindowMixin):
         if not self.bb_duplication_mode or not source_shape:
             return
         
+        print(f"[BB Duplication] Starting BB duplication from frame {self.cur_img_idx}")
+        print(f"[BB Duplication] Source shape points: {[(p.x(), p.y()) for p in source_shape.points]}")
         
         # Get number of frames to duplicate to
         num_frames = self.bb_dup_frame_count.value()
@@ -3201,14 +3189,17 @@ class MainWindow(QMainWindow, WindowMixin):
                 # Only check IoU if both shapes have 4 points (rectangles)
                 if len(source_shape.points) == 4 and len(existing_shape.points) == 4:
                     iou = self.calculate_iou(source_shape.points, existing_shape.points)
+                    print(f"[BB Duplication] Checking IOU with existing shape: {iou:.3f}")
                     if iou >= self.bb_dup_iou_threshold.value():
                         if overwrite_mode:
                             # Mark shape for removal
                             shapes_to_remove.append(existing_shape)
+                            print(f"[BB Duplication] Frame {target_idx}: Overwriting existing BB (IOU={iou:.2f})")
                         else:
                             # Skip this frame if any overlap found
                             should_add_shape = False
                             frames_with_conflicts += 1
+                            print(f"[BB Duplication] Frame {target_idx}: Skipping due to overlap (IOU={iou:.2f})")
                             break  # In skip mode, one overlap is enough to skip
             
             # Perform modifications
@@ -3354,6 +3345,7 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # If continuous tracking mode is ON, propagate label using IOU tracking
         if self.continuous_tracking_mode:
+            print(f"[ContinuousTracking] Starting IOU-based label propagation: '{old_label1}' -> '{new_label1}'")
             
             # Create progress dialog
             from PyQt5.QtWidgets import QProgressDialog, QApplication
@@ -3388,6 +3380,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     # Fallback to label1 for safety
                     change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label1, new_label1, direct_file_edit=False)
             change_commands.append(change_cmd)
+            print(f"[ContinuousTracking] Changed current frame {current_idx}: '{old_label1}' -> '{new_label1}'")
             
             # Get current shape's points for IOU matching
             current_shape_points = [(p.x(), p.y()) for p in shape.points]
@@ -3417,9 +3410,11 @@ class MainWindow(QMainWindow, WindowMixin):
                 # Load target frame's annotation without changing current view
                 import os
                 annotation_path = self.get_annotation_path(target_file)
+                print(f"[ContinuousTracking] Checking frame {target_idx}: {annotation_path}")
                 if annotation_path and os.path.exists(annotation_path):
                     # Load shapes from annotation file directly, pass the image path
                     shapes_in_target = self.load_shapes_from_annotation_file(annotation_path, target_file)
+                    print(f"[ContinuousTracking] Found {len(shapes_in_target)} shapes in frame {target_idx}")
                     
                     # Find best matching shape using IOU (regardless of current label)
                     best_match_idx = -1
@@ -3432,11 +3427,13 @@ class MainWindow(QMainWindow, WindowMixin):
                         
                         # Debug: Print first point of each shape to see coordinate ranges
                         if idx == 0 and len(target_points) > 0 and len(prev_shape_points) > 0:
-                            # Debug info removed - use logging if needed
+                            print(f"[DEBUG] Prev shape first point: {prev_shape_points[0]}")
+                            print(f"[DEBUG] Target shape first point: {target_points[0]}")
                         
                         # Calculate IOU regardless of label
                         if len(target_points) == 4 and len(prev_shape_points) == 4:
                             iou = self.calculate_iou(prev_shape_points, target_points)
+                            print(f"[ContinuousTracking] Shape {idx} (label='{shape_label}'): IOU={iou:.3f}")
                             
                             # Use IOU threshold of 0.4 as per specification
                             if iou > best_iou and iou >= 0.4:
@@ -3463,9 +3460,11 @@ class MainWindow(QMainWindow, WindowMixin):
                         
                         # Check if we hit the target label (stop condition)
                         if best_match_label == target_new_label:
+                            print(f"[ContinuousTracking] Found shape with target label '{target_new_label}' at frame {target_idx}, stopping")
                             break
                         
                         # Found matching shape, change its label to target_new_label
+                        print(f"[ContinuousTracking] Tracking successful at frame {target_idx}")
                         
                         # Print appropriate debug message based on what's being changed
                         if self.dual_label_mode:
@@ -3476,7 +3475,9 @@ class MainWindow(QMainWindow, WindowMixin):
                                 changes.append(f"label1: '{old_l1}' -> '{new_label1}'")
                             if self.change_label2_enabled:
                                 changes.append(f"label2: '{old_l2}' -> '{new_label2}'")
+                            print(f"[ContinuousTracking]   - Shape {best_match_idx}: {', '.join(changes)} (IOU={best_iou:.3f})")
                         else:
+                            print(f"[ContinuousTracking]   - Shape {best_match_idx}: '{best_match_label}' -> '{target_new_label}' (IOU={best_iou:.3f})")
                         
                         # Create change command based on mode
                         if self.dual_label_mode:
@@ -3504,9 +3505,11 @@ class MainWindow(QMainWindow, WindowMixin):
                         frames_processed += 1
                     else:
                         # No matching shape found (IOU < 0.4), stop propagation
+                        print(f"[ContinuousTracking] No matching shape found in frame {target_idx} (IOU < 0.4), stopping")
                         break
                 else:
                     # No annotation file, stop propagation
+                    print(f"[ContinuousTracking] No annotation found in frame {target_idx}, stopping")
                     break
             
             progress.close()
@@ -3574,6 +3577,7 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.auto_saving.isChecked() and self.default_save_dir:
             self.save_file()
         
+        print(f"[ClickChange] Applied to current frame: {old_label} -> {new_label}")
         
         # 後続フレームに伝播
         frames_processed = self._propagate_label_to_subsequent_frames_multi(shape, new_label, "ClickChange")
@@ -3775,8 +3779,8 @@ class MainWindow(QMainWindow, WindowMixin):
         if not self.continuous_tracking_mode or not source_shape:
             return
         
-        logger.debug(f"[Propagate] Starting label propagation from frame {self.cur_img_idx}")
-        logger.debug(f"[Propagate] Will stop when encountering label: {source_shape.label}")
+        print(f"[Propagate] Starting label propagation from frame {self.cur_img_idx}")
+        print(f"[Propagate] Will stop when encountering label: {source_shape.label}")
         
         # Create progress dialog
         progress = self._create_progress_dialog()
@@ -3824,7 +3828,7 @@ class MainWindow(QMainWindow, WindowMixin):
         while frame_idx < self.img_count:
             # Check if cancelled
             if progress.wasCanceled():
-                logger.debug(f"[Propagate] Cancelled by user at frame {frame_idx}")
+                print(f"[Propagate] Cancelled by user at frame {frame_idx}")
                 break
             
             # Update progress
@@ -3837,7 +3841,7 @@ class MainWindow(QMainWindow, WindowMixin):
             shapes_data = self._load_annotation_shapes_with_size(annotation_paths, next_file, image_size)
             
             if not shapes_data:
-                logger.debug(f"[Propagate] No annotation found at frame {frame_idx}, stopping")
+                print(f"[Propagate] No annotation found at frame {frame_idx}, stopping")
                 break
             
             # Find matching shape in next frame
@@ -3847,11 +3851,11 @@ class MainWindow(QMainWindow, WindowMixin):
                 # Check if the matched shape already has the same label (stop condition)
                 current_label = shapes_data[best_match_idx][0]
                 if stop_label and current_label == stop_label:
-                    logger.debug(f"[Propagate] Encountered same label '{stop_label}' at frame {frame_idx}, stopping")
+                    print(f"[Propagate] Encountered same label '{stop_label}' at frame {frame_idx}, stopping")
                     break
                 
                 # Update the matched shape's label
-                logger.debug(f"[Propagate] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current label: {current_label})")
+                print(f"[Propagate] Found match at frame {frame_idx} with IOU {best_iou:.2f} (current label: {current_label})")
                 shapes_data[best_match_idx] = self._update_shape_label(shapes_data[best_match_idx], source_label)
                 
                 # Save the updated annotation
@@ -3865,12 +3869,12 @@ class MainWindow(QMainWindow, WindowMixin):
                     prev_shape.close()
                     frames_processed += 1
                 else:
-                    logger.debug(f"[Propagate] Failed to save annotation at frame {frame_idx}")
+                    print(f"[Propagate] Failed to save annotation at frame {frame_idx}")
                     break
                 
                 frame_idx += 1
             else:
-                logger.debug(f"[Propagate] No match found at frame {frame_idx}, stopping")
+                print(f"[Propagate] No match found at frame {frame_idx}, stopping")
                 break
         
         return frames_processed
@@ -3908,9 +3912,9 @@ class MainWindow(QMainWindow, WindowMixin):
                     reader = YoloReader(annotation_paths['txt'], image)
                     return reader.get_shapes()
                 else:
-                    logger.debug(f"[Propagate] Failed to load image: {image_file}")
+                    print(f"[Propagate] Failed to load image: {image_file}")
             else:
-                logger.debug(f"[Propagate] Image file not found: {image_file}")
+                print(f"[Propagate] Image file not found: {image_file}")
         
         # Try CreateML format
         elif os.path.isfile(annotation_paths['json']):
@@ -3937,7 +3941,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 reader = YoloReader(annotation_paths['txt'], minimal_image)
                 return reader.get_shapes()
             else:
-                logger.debug(f"[Propagate] No valid image size available for YOLO format")
+                print(f"[Propagate] No valid image size available for YOLO format")
                 return None
         
         # Try CreateML format
@@ -3966,7 +3970,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     if not image.isNull():
                         image_cache[image_file] = image
                     else:
-                        logger.debug(f"[Propagate] Failed to load image: {image_file}")
+                        print(f"[Propagate] Failed to load image: {image_file}")
                         return None
                 
                 if image_file in image_cache:
@@ -3974,7 +3978,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     reader = YoloReader(annotation_paths['txt'], image_cache[image_file])
                     return reader.get_shapes()
             else:
-                logger.debug(f"[Propagate] Image file not found: {image_file}")
+                print(f"[Propagate] Image file not found: {image_file}")
         
         # Try CreateML format
         elif os.path.isfile(annotation_paths['json']):
@@ -4129,10 +4133,10 @@ class MainWindow(QMainWindow, WindowMixin):
                 temp_label_file.save_create_ml_format(save_path, shapes_for_save, image_file, None,
                                                      self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
             
-            logger.debug(f"[Propagate] Saved updated annotation to {save_path}")
+            print(f"[Propagate] Saved updated annotation to {save_path}")
             return True
         except Exception as e:
-            logger.debug(f"[Propagate] Error saving annotation: {str(e)}")
+            print(f"[Propagate] Error saving annotation: {str(e)}")
             return False
     
     def _save_propagated_annotation_with_size(self, annotation_paths, shapes_data, image_file, image_size):
@@ -4186,7 +4190,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     temp_label_file.save_yolo_format(save_path, shapes_for_save, image_file, image_data, 
                                                    self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
                 else:
-                    logger.debug(f"[Propagate] Cannot save YOLO format without image size")
+                    print(f"[Propagate] Cannot save YOLO format without image size")
                     return False
             elif save_format == LabelFileFormat.CREATE_ML:
                 temp_label_file.save_create_ml_format(save_path, shapes_for_save, image_file, None,
@@ -4194,7 +4198,7 @@ class MainWindow(QMainWindow, WindowMixin):
             
             return True
         except Exception as e:
-            logger.debug(f"[Propagate] Error saving annotation: {str(e)}")
+            print(f"[Propagate] Error saving annotation: {str(e)}")
             return False
     
     def _save_propagated_annotation_with_cache(self, annotation_paths, shapes_data, image_file, image_cache):
@@ -4257,7 +4261,7 @@ class MainWindow(QMainWindow, WindowMixin):
             
             return True
         except Exception as e:
-            logger.debug(f"[Propagate] Error saving annotation: {str(e)}")
+            print(f"[Propagate] Error saving annotation: {str(e)}")
             return False
     
     def _format_shape_for_save(self, shape):
@@ -4296,7 +4300,7 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def _show_completion_message(self, frames_processed):
         """Show completion message in status bar."""
-        logger.debug(f"[Propagate] Completed. Propagated to {frames_processed} frames")
+        print(f"[Propagate] Completed. Propagated to {frames_processed} frames")
         
         if frames_processed > 0:
             self.statusBar().showMessage(f'連続ID付けが完了しました。{frames_processed}フレームに伝播しました。', 3000)
@@ -4328,11 +4332,15 @@ class MainWindow(QMainWindow, WindowMixin):
         
         
         # Debug: Print before tracking
+        print(f"[Tracking] Applying tracking to frame {self.cur_img_idx}")
+        print(f"[Tracking] Prev shapes: {[s.label for s in self.prev_frame_shapes]}")
+        print(f"[Tracking] Curr shapes before: {[s.label for s in curr_shapes]}")
         
         # Apply tracking
         self.tracker.track_shapes(self.prev_frame_shapes, curr_shapes)
         
         # Debug: Print after tracking
+        print(f"[Tracking] Curr shapes after: {[s.label for s in curr_shapes]}")
         
         # Update colors for tracked shapes
         for shape in curr_shapes:
