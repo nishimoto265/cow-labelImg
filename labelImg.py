@@ -3534,18 +3534,20 @@ class MainWindow(QMainWindow, WindowMixin):
             # First, change the current frame
             if self.dual_label_mode:
                 # Use dual label command for dual label mode
+                # Use direct_file_edit=True for batch processing performance
                 change_cmd = ChangeDualLabelCommand(self.file_path, shape_index, 
                                                    old_label1, new_label1,
                                                    old_label2, new_label2,
-                                                   self.change_label1_enabled, self.change_label2_enabled)
+                                                   self.change_label1_enabled, self.change_label2_enabled,
+                                                   direct_file_edit=True)  # Use direct file edit for performance
             else:
                 # Use single label command for single label mode  
                 # Note: old_label and new_label are only defined in single label mode branch
                 if 'old_label' in locals() and 'new_label' in locals():
-                    change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label, direct_file_edit=False)
+                    change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label, new_label, direct_file_edit=True)
                 else:
                     # Fallback to label1 for safety
-                    change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label1, new_label1, direct_file_edit=False)
+                    change_cmd = ChangeLabelCommand(self.file_path, shape_index, old_label1, new_label1, direct_file_edit=True)
             change_commands.append(change_cmd)
             print(f"[ContinuousTracking] Changed current frame {current_idx}: '{old_label1}' -> '{new_label1}'")
             
@@ -3707,9 +3709,17 @@ class MainWindow(QMainWindow, WindowMixin):
                 
                 composite_cmd = CompositeCommand(change_commands, desc)
                 result = self.undo_manager.execute_command(composite_cmd)
+                
+                # Reload current frame to update UI after batch processing
+                if result:
+                    # Reload annotation for current frame to reflect changes
+                    self.load_file(self.file_path, preserve_zoom=True)
             else:
                 # Just single frame
                 result = self.undo_manager.execute_command(change_commands[0])
+                # Reload current frame to update UI
+                if result:
+                    self.load_file(self.file_path, preserve_zoom=True)
             
         else:
             # Normal single-frame operation - use Command pattern
