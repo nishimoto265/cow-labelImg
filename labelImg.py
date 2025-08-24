@@ -1316,6 +1316,10 @@ class MainWindow(QMainWindow, WindowMixin):
         shape.paint_label = self.display_label_option.isChecked()
         shape.paint_id = self.draw_id_checkbox.isChecked()
         
+        # Set label visibility based on checkboxes
+        shape.show_label1 = self.show_label1_checkbox.isChecked()
+        shape.show_label2 = self.show_label2_checkbox.isChecked()
+        
         # Ensure shape.label1 and shape.label2 are properly set
         if not hasattr(shape, 'label1'):
             shape.label1 = shape.label if hasattr(shape, 'label') else ""
@@ -1401,6 +1405,13 @@ class MainWindow(QMainWindow, WindowMixin):
                 continue
             
             shape = Shape(label=label, label2=label2)
+            # Ensure label1 is also set for consistency
+            shape.label1 = label
+            
+            # Set label visibility based on current checkbox states
+            shape.show_label1 = self.show_label1_checkbox.isChecked()
+            shape.show_label2 = self.show_label2_checkbox.isChecked()
+            
             for x, y in points:
 
                 # Ensure the labels are within the bounds of the image. If not, fix them.
@@ -1411,15 +1422,20 @@ class MainWindow(QMainWindow, WindowMixin):
                 shape.add_point(QPointF(x, y))
             shape.difficult = difficult
             
+            # Set colors based on current color mode
             if line_color:
                 shape.line_color = QColor(*line_color)
             else:
-                shape.line_color = generate_color_by_text(label)
+                # Use color mode to determine which label to use for color
+                color_label = self.get_color_label_for_shape(shape)
+                shape.line_color = generate_color_by_text(color_label)
 
             if fill_color:
                 shape.fill_color = QColor(*fill_color)
             else:
-                shape.fill_color = generate_color_by_text(label)
+                # Use color mode to determine which label to use for color
+                color_label = self.get_color_label_for_shape(shape)
+                shape.fill_color = generate_color_by_text(color_label)
                 
             shape.close()
             s.append(shape)
@@ -2737,6 +2753,11 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def on_color_mode_changed(self, button):
         """Handle color mode change for BB display."""
+        # Save the setting immediately when changed
+        if hasattr(self, 'settings'):
+            self.settings['BB_COLOR_MODE'] = self.color_mode_group.checkedId()
+            self.settings.save()
+        
         # Update colors for all shapes based on new mode
         for shape in self.canvas.shapes:
             self.update_shape_color(shape)
