@@ -49,10 +49,16 @@ class YOLOWriter:
             if len(parts) > 1 and 'name2' not in box:
                 box['name2'] = parts[1]
         
-        if box_name not in class_list:
+        # For ID-based classes (dual label mode), use the ID directly
+        # If the box_name is already in class_list, use it directly as ID
+        if box_name in class_list:
+            # ID-based mode: use the ID string directly
+            class_index = box_name
+        else:
+            # Add to class list if not present
             class_list.append(box_name)
-
-        class_index = class_list.index(box_name)
+            # Use the ID string directly
+            class_index = box_name
         
         # Handle second label - return label name directly instead of index
         label2 = ""
@@ -91,12 +97,20 @@ class YOLOWriter:
 
         for box in self.box_list:
             class_index, label2, x_center, y_center, w, h = self.bnd_box_to_yolo_line(box, class_list, class_list2)
-            # New dual label format: class1 x_center y_center w h label2_name
-            if label2:
-                out_file.write("%d %.6f %.6f %.6f %.6f %s\n" % (class_index, x_center, y_center, w, h, label2))
+            
+            # Handle class_index as either integer or string (for ID-based mode)
+            if isinstance(class_index, str):
+                # ID-based mode: write the ID directly as a string
+                if label2:
+                    out_file.write("%s %.6f %.6f %.6f %.6f %s\n" % (class_index, x_center, y_center, w, h, label2))
+                else:
+                    out_file.write("%s %.6f %.6f %.6f %.6f\n" % (class_index, x_center, y_center, w, h))
             else:
-                # Backward compatibility: single label format (no label2 at the end)
-                out_file.write("%d %.6f %.6f %.6f %.6f\n" % (class_index, x_center, y_center, w, h))
+                # Traditional index-based mode
+                if label2:
+                    out_file.write("%d %.6f %.6f %.6f %.6f %s\n" % (class_index, x_center, y_center, w, h, label2))
+                else:
+                    out_file.write("%d %.6f %.6f %.6f %.6f\n" % (class_index, x_center, y_center, w, h))
 
         # Save class lists
         for c in class_list:
@@ -196,11 +210,28 @@ class YoloReader:
             self.shapes.append((label, points, None, None, difficult))
 
     def yolo_line_to_shape(self, class_index, x_center, y_center, w, h):
-        class_idx = int(class_index)
-        if class_idx >= len(self.classes):
-            print(f"[YOLO] Warning: Class index {class_idx} out of range (max: {len(self.classes)-1}), using index 0")
-            class_idx = 0
-        label = self.classes[class_idx]
+        # For dual label mode with IDs as classes, preserve the original string format
+        # Do NOT convert to int to preserve '00' vs '0' distinction
+        class_str = str(class_index).strip()
+        
+        # Check if we're using ID-based classes (dual label mode)
+        # If classes list contains the exact string, use it directly
+        if class_str in self.classes:
+            label = class_str
+        else:
+            # Try as integer index for backward compatibility
+            try:
+                class_idx = int(class_index)
+                if 0 <= class_idx < len(self.classes):
+                    label = self.classes[class_idx]
+                else:
+                    # For ID-based annotations, use the original string
+                    print(f"[YOLO] Warning: Class '{class_str}' not found in classes list, using as ID directly")
+                    label = class_str
+            except (ValueError, IndexError):
+                # If conversion fails, use the string directly
+                print(f"[YOLO] Warning: Class '{class_str}' not found in classes list, using as ID directly")
+                label = class_str
 
         x_min = max(float(x_center) - float(w) / 2, 0)
         x_max = min(float(x_center) + float(w) / 2, 1)
