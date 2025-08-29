@@ -158,6 +158,9 @@ class MainWindow(QMainWindow, WindowMixin):
         # Initialize BB duplication feature
         self.bb_duplication_mode = False
         
+        # Initialize region deletion feature
+        self.region_deletion_mode = False
+        
         # Initialize click-to-change-label mode
         self.click_change_label_mode = False
         self._applying_label = False
@@ -415,6 +418,37 @@ class MainWindow(QMainWindow, WindowMixin):
         self.update_overwrite_checkbox_text()
         
         list_layout.addWidget(bb_dup_container)
+
+        # Create region deletion feature container
+        region_del_container = QWidget()
+        region_del_layout = QVBoxLayout()
+        region_del_layout.setContentsMargins(0, 0, 0, 0)
+        region_del_container.setLayout(region_del_layout)
+        
+        # Region deletion mode checkbox
+        self.region_deletion_checkbox = QCheckBox("領域内BB削除モード")
+        self.region_deletion_checkbox.setChecked(False)
+        self.region_deletion_checkbox.stateChanged.connect(self.toggle_region_deletion)
+        region_del_layout.addWidget(self.region_deletion_checkbox)
+        
+        # Frame count for region deletion
+        region_del_frames_layout = QHBoxLayout()
+        region_del_frames_layout.setContentsMargins(0, 0, 0, 0)
+        
+        region_del_frames_label = QLabel("後続フレーム数:")
+        region_del_frames_layout.addWidget(region_del_frames_label)
+        
+        self.region_deletion_frames_spinbox = QSpinBox()
+        self.region_deletion_frames_spinbox.setMinimum(1)
+        self.region_deletion_frames_spinbox.setMaximum(100)
+        self.region_deletion_frames_spinbox.setValue(1)
+        self.region_deletion_frames_spinbox.setEnabled(False)  # Disabled until checkbox is checked
+        region_del_frames_layout.addWidget(self.region_deletion_frames_spinbox)
+        
+        region_del_frames_layout.addStretch()
+        region_del_layout.addLayout(region_del_frames_layout)
+        
+        list_layout.addWidget(region_del_container)
 
         # Create and add combobox for showing unique labels in group
         self.combo_box = ComboBox(self)
@@ -1692,8 +1726,28 @@ class MainWindow(QMainWindow, WindowMixin):
                         traceback.print_exc()
                         return False
             
+            # Apply region deletion if enabled
+            if self.region_deletion_mode:
+                # Remove the temporary shape from canvas (we don't want to save it)
+                if self.canvas.shapes:
+                    region_shape = self.canvas.shapes.pop()
+                    
+                    # Get the region bounds
+                    region_points = [(p.x(), p.y()) for p in region_shape.points]
+                    if len(region_points) >= 2:
+                        x_coords = [p[0] for p in region_points]
+                        y_coords = [p[1] for p in region_points]
+                        region_x1, region_x2 = min(x_coords), max(x_coords)
+                        region_y1, region_y2 = min(y_coords), max(y_coords)
+                        
+                        # Execute region deletion
+                        self.delete_bbs_in_region(region_x1, region_y1, region_x2, region_y2)
+                
+                # Don't continue with normal shape addition
+                return
+            
             # Apply BB duplication if enabled
-            if self.bb_duplication_mode:
+            elif self.bb_duplication_mode:
                 
                 # Create progress dialog
                 from PyQt5.QtWidgets import QProgressDialog, QApplication
@@ -2815,6 +2869,179 @@ class MainWindow(QMainWindow, WindowMixin):
         """Update the overwrite checkbox text with current IOU threshold."""
         threshold = self.bb_dup_iou_threshold.value()
         self.bb_dup_overwrite_checkbox.setText(f"重複時に上書き (IOU>{threshold:.1f})")
+    
+    def toggle_region_deletion(self, state):
+        """Toggle region deletion mode."""
+        self.region_deletion_mode = (state == Qt.Checked)
+        self.region_deletion_frames_spinbox.setEnabled(self.region_deletion_mode)
+        
+        # Disable BB duplication mode if region deletion is enabled
+        if self.region_deletion_mode and self.bb_duplication_mode:
+            self.bb_duplication_checkbox.setChecked(False)
+            self.statusBar().showMessage('領域内BB削除モードを有効にしました', 2000)
+    
+    def delete_bbs_in_region(self, region_x1, region_y1, region_x2, region_y2):
+        """Delete all bounding boxes completely contained within the specified region."""
+        from PyQt5.QtWidgets import QProgressDialog, QApplication
+        from libs.undo.commands.shape_commands import DeleteShapeCommand
+        from libs.undo.commands.composite_command import CompositeCommand
+        
+        # Get number of frames to process
+        num_frames = self.region_deletion_frames_spinbox.value()
+        current_idx = self.cur_img_idx
+        
+        # Create progress dialog if processing multiple frames
+        progress = None
+        if num_frames > 1:
+            progress = QProgressDialog("領域内BB削除処理中...", "キャンセル", 0, num_frames, self)
+            progress.setWindowTitle("処理中")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+        
+        # Store all deletion commands
+        all_delete_commands = []
+        total_deleted = 0
+        frames_processed = 0
+        
+        # Process current frame and subsequent frames
+        for frame_offset in range(num_frames):
+            if progress and progress.wasCanceled():
+                break
+                
+            target_idx = current_idx + frame_offset
+            if target_idx >= self.img_count:
+                break
+            
+            if progress:
+                progress.setValue(frame_offset)
+                progress.setLabelText(f"フレーム {target_idx + 1}/{self.img_count} を処理中...")
+                QApplication.processEvents()
+            
+            # Get the target file
+            target_file = self.m_img_list[target_idx] if frame_offset > 0 else self.file_path
+            
+            # Find shapes to delete in this frame
+            if frame_offset == 0:
+                # Current frame - check current canvas shapes
+                shapes_to_delete = []
+                for i, shape in enumerate(self.canvas.shapes):
+                    if self.is_shape_contained_in_region(shape, region_x1, region_y1, region_x2, region_y2):
+                        shapes_to_delete.append((i, shape))
+                
+                # Create delete commands for current frame (in reverse order to maintain indices)
+                for shape_index, shape in reversed(shapes_to_delete):
+                    delete_cmd = DeleteShapeCommand(target_file, shape_index)
+                    all_delete_commands.append(delete_cmd)
+                    total_deleted += 1
+            else:
+                # Other frames - need to load and check
+                shapes_to_delete = self.find_shapes_in_region_for_frame(
+                    target_file, region_x1, region_y1, region_x2, region_y2
+                )
+                
+                # Create delete commands for this frame
+                for shape_index in reversed(shapes_to_delete):
+                    delete_cmd = DeleteShapeCommand(target_file, shape_index)
+                    all_delete_commands.append(delete_cmd)
+                    total_deleted += 1
+            
+            frames_processed += 1
+        
+        if progress:
+            progress.close()
+        
+        # Execute all delete commands as a composite
+        if all_delete_commands:
+            composite_cmd = CompositeCommand(
+                all_delete_commands,
+                f"Region deletion: {total_deleted} BBs from {frames_processed} frame(s)"
+            )
+            self.undo_manager.execute_command(composite_cmd)
+            
+            # Update display
+            self.canvas.load_shapes(self.canvas.shapes)
+            self.label_list.clear()
+            self.load_labels(self.canvas.shapes)
+            
+            # Show status message
+            if frames_processed > 1:
+                self.statusBar().showMessage(
+                    f'{total_deleted}個のBBを削除しました ({frames_processed}フレーム)', 3000
+                )
+            else:
+                self.statusBar().showMessage(
+                    f'{total_deleted}個のBBを削除しました', 3000
+                )
+        else:
+            self.statusBar().showMessage('削除対象のBBが見つかりませんでした', 2000)
+    
+    def is_shape_contained_in_region(self, shape, region_x1, region_y1, region_x2, region_y2):
+        """Check if a shape is completely contained within the specified region."""
+        # Get shape bounds
+        points = shape.points
+        if len(points) < 2:
+            return False
+        
+        x_coords = [p.x() for p in points]
+        y_coords = [p.y() for p in points]
+        shape_x1, shape_x2 = min(x_coords), max(x_coords)
+        shape_y1, shape_y2 = min(y_coords), max(y_coords)
+        
+        # Check if shape is completely inside region
+        return (region_x1 <= shape_x1 and 
+                region_y1 <= shape_y1 and
+                region_x2 >= shape_x2 and
+                region_y2 >= shape_y2)
+    
+    def find_shapes_in_region_for_frame(self, frame_path, region_x1, region_y1, region_x2, region_y2):
+        """Find shapes contained in region for a specific frame (without loading it visually)."""
+        import os
+        from libs.yolo_io import YoloReader
+        from libs.pascal_voc_io import PascalVocReader
+        
+        # Determine the annotation file path and format
+        if self.usingPascalVocFormat:
+            # Pascal VOC format
+            ann_path = frame_path.replace('.jpg', '.xml').replace('.png', '.xml')
+            if os.path.exists(ann_path):
+                reader = PascalVocReader(ann_path)
+                shapes = reader.get_shapes()
+            else:
+                return []
+        else:
+            # YOLO format
+            ann_path = frame_path.replace('.jpg', '.txt').replace('.png', '.txt')
+            if os.path.exists(ann_path):
+                from PyQt5.QtGui import QImage
+                img = QImage(frame_path)
+                # Get class list path from annotation directory
+                ann_dir = os.path.dirname(ann_path)
+                class_list_path = os.path.join(ann_dir, "classes.txt")
+                if not os.path.exists(class_list_path):
+                    class_list_path = os.path.join(ann_dir, "classes1.txt")
+                reader = YoloReader(ann_path, img, class_list_path if os.path.exists(class_list_path) else None)
+                shapes = reader.get_shapes()
+            else:
+                return []
+        
+        # Find shapes contained in region
+        indices_to_delete = []
+        for i, (label, points, _, _, difficult, label2) in enumerate(shapes):
+            # Convert points to QPointF-like format for consistency
+            x_coords = [p[0] for p in points]
+            y_coords = [p[1] for p in points]
+            shape_x1, shape_x2 = min(x_coords), max(x_coords)
+            shape_y1, shape_y2 = min(y_coords), max(y_coords)
+            
+            # Check if shape is completely inside region
+            if (region_x1 <= shape_x1 and 
+                region_y1 <= shape_y1 and
+                region_x2 >= shape_x2 and
+                region_y2 >= shape_y2):
+                indices_to_delete.append(i)
+        
+        return indices_to_delete
     
     def toggle_quick_id_selector(self):
         """Quick ID Selectorの表示/非表示を切り替え"""
