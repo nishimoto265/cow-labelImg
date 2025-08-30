@@ -87,13 +87,17 @@ class RegionDeletionCommand(Command):
             print(f"[RegionDeletionCommand] Actually deleted {deleted_count} shapes")
             print(f"[RegionDeletionCommand] Canvas has {len(app.canvas.shapes)} shapes after deletion")
             
-            # DON'T update canvas here - let the main method handle it
-            # The main delete_bbs_in_region method will update the display
+            # Update canvas display
+            if hasattr(app.canvas, 'update'):
+                app.canvas.update()
             
             # Mark as dirty
             app.set_dirty()
             
-            # Do NOT auto-save here - let the main app decide when to save
+            # Save the changes to file
+            if hasattr(app, 'save_file'):
+                app.save_file()
+                print(f"[RegionDeletionCommand] Saved changes to file")
             
             self.executed = True
             return True

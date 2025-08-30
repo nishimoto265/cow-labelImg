@@ -31,6 +31,7 @@ class Canvas(QWidget):
     drawingPolygon = pyqtSignal(bool)
     shapeClicked = pyqtSignal()
     shapeModified = pyqtSignal()  # Shape edited (moved, resized)
+    region_deletion_finished = pyqtSignal(float, float, float, float)  # Signal when region is drawn for deletion
 
     CREATE, EDIT = list(range(2))
 
@@ -73,9 +74,21 @@ class Canvas(QWidget):
         self.shape_resize_start = None
         self.selected_shape_index = None
         self.show_bounding_boxes = True  # デフォルトでBBを表示
+        
+        # Region deletion mode
+        self.region_deletion_mode = False
+        self.region_deletion_rect = None
 
         # initialisation for panning
         self.pan_initial_pos = QPoint()
+
+    def set_region_deletion_mode(self, enabled):
+        """Enable or disable region deletion mode"""
+        print(f"[Canvas] Region deletion mode set to: {enabled}")
+        self.region_deletion_mode = enabled
+        if not enabled:
+            self.region_deletion_rect = None
+            self.update()
 
     def set_drawing_color(self, qcolor):
         self.drawing_line_color = qcolor
@@ -373,7 +386,20 @@ class Canvas(QWidget):
             self.current.add_point(QPointF(max_x, min_y))
             self.current.add_point(target_pos)
             self.current.add_point(QPointF(min_x, max_y))
-            self.finalise()
+            
+            # Check if in region deletion mode
+            if self.region_deletion_mode:
+                print(f"[Canvas] Finalizing region for deletion")
+                print(f"[Canvas] Region bounds: ({min_x:.1f}, {min_y:.1f}) to ({max_x:.1f}, {max_y:.1f})")
+                # Store the region temporarily
+                self.region_deletion_rect = (min_x, min_y, max_x, max_y)
+                # Don't finalize as a shape, trigger deletion instead
+                self.current = None
+                self.drawingPolygon.emit(False)
+                # Emit signal for region deletion
+                self.region_deletion_finished.emit(min_x, min_y, max_x, max_y)
+            else:
+                self.finalise()
         elif not self.out_of_pixmap(pos):
             self.current = Shape()
             self.current.add_point(pos)

@@ -443,6 +443,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.region_deletion_frames_spinbox.setMaximum(100)
         self.region_deletion_frames_spinbox.setValue(1)
         self.region_deletion_frames_spinbox.setEnabled(False)  # Disabled until checkbox is checked
+        self.region_deletion_frames_spinbox.valueChanged.connect(lambda v: print(f"[Spinbox] Value changed to: {v}"))
         region_del_frames_layout.addWidget(self.region_deletion_frames_spinbox)
         
         region_del_frames_layout.addStretch()
@@ -538,6 +539,8 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.drawingPolygon.connect(self.toggle_drawing_sensitive)
         self.canvas.shapeClicked.connect(self.on_shape_clicked)
         
+        # Connect region deletion signal
+        self.canvas.region_deletion_finished.connect(self.delete_bbs_in_region)
 
         self.setCentralWidget(scroll)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
@@ -1775,11 +1778,17 @@ class MainWindow(QMainWindow, WindowMixin):
                 num_frames = self.bb_dup_frame_count.value()
                 current_idx = self.cur_img_idx
                 
-                progress = QProgressDialog("BB複製処理中...", "キャンセル", 0, num_frames + 1, self)
+                progress = QProgressDialog(self)
+                progress.setLabelText("BB複製処理中...")
+                progress.setCancelButtonText("キャンセル")
+                progress.setRange(0, num_frames + 1)
                 progress.setWindowTitle("処理中")
-                progress.setWindowModality(Qt.WindowModal)
+                progress.setWindowModality(Qt.ApplicationModal)
                 progress.setMinimumDuration(0)
+                progress.setMinimumWidth(350)
+                progress.setMinimumHeight(100)
                 progress.show()
+                QApplication.processEvents()
                 
                 # Get IOU settings
                 iou_threshold = self.bb_dup_iou_threshold.value()
@@ -2894,6 +2903,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.region_deletion_mode = (state == Qt.Checked)
         self.region_deletion_frames_spinbox.setEnabled(self.region_deletion_mode)
         
+        # Set canvas mode
+        self.canvas.set_region_deletion_mode(self.region_deletion_mode)
+        
         # Disable BB duplication mode if region deletion is enabled
         if self.region_deletion_mode and self.bb_duplication_mode:
             self.bb_duplication_checkbox.setChecked(False)
@@ -2923,17 +2935,25 @@ class MainWindow(QMainWindow, WindowMixin):
         num_frames = self.region_deletion_frames_spinbox.value()
         current_idx = self.cur_img_idx
         
+        print(f"[delete_bbs_in_region] Spinbox value: {num_frames}")
+        print(f"[delete_bbs_in_region] Spinbox enabled: {self.region_deletion_frames_spinbox.isEnabled()}")
         print(f"[delete_bbs_in_region] Processing {num_frames} frames starting from frame {current_idx}")
         print(f"[delete_bbs_in_region] Total images available: {self.img_count}")
         
         # Create progress dialog if processing multiple frames
         progress = None
         if num_frames > 1:
-            progress = QProgressDialog("領域内BB削除処理中...", "キャンセル", 0, num_frames, self)
+            progress = QProgressDialog(self)
+            progress.setLabelText("領域内BB削除処理中...")
+            progress.setCancelButtonText("キャンセル")
+            progress.setRange(0, num_frames)
             progress.setWindowTitle("処理中")
-            progress.setWindowModality(Qt.WindowModal)
+            progress.setWindowModality(Qt.ApplicationModal)
             progress.setMinimumDuration(0)
+            progress.setMinimumWidth(350)
+            progress.setMinimumHeight(100)
             progress.show()
+            QApplication.processEvents()
         
         # Store all deletion commands
         all_delete_commands = []
@@ -3043,8 +3063,19 @@ class MainWindow(QMainWindow, WindowMixin):
                 print(f"[delete_bbs_in_region]   {i}: {shape_label}")
             
             # Rebuild label list
+            print(f"[delete_bbs_in_region] Rebuilding label list for {len(self.canvas.shapes)} shapes")
             self.label_list.clear()
-            self.load_labels(self.canvas.shapes)
+            
+            # Clear mappings before rebuilding
+            self.items_to_shapes.clear()
+            self.shapes_to_items.clear()
+            
+            # Manually add labels
+            if len(self.canvas.shapes) > 0:
+                print(f"[delete_bbs_in_region] Adding labels for {len(self.canvas.shapes)} shapes...")
+                for shape in self.canvas.shapes:
+                    self.add_label(shape)
+                    print(f"[delete_bbs_in_region] Added label for shape: {shape.label if hasattr(shape, 'label') else 'unknown'}")
             
             print(f"[delete_bbs_in_region] Display updated. Label list has {self.label_list.count()} items")
             
@@ -3659,11 +3690,17 @@ class MainWindow(QMainWindow, WindowMixin):
         frames_with_conflicts = 0
         
         # Create progress dialog
-        progress = QProgressDialog("BB複製処理中...", "キャンセル", 0, num_frames, self)
+        progress = QProgressDialog(self)
+        progress.setLabelText("BB複製処理中...")
+        progress.setCancelButtonText("キャンセル")
+        progress.setRange(0, num_frames)
         progress.setWindowTitle("処理中")
-        progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowModality(Qt.ApplicationModal)
         progress.setMinimumDuration(0)
+        progress.setMinimumWidth(350)
+        progress.setMinimumHeight(100)
         progress.show()
+        QApplication.processEvents()
         
         for i in range(1, num_frames + 1):
             if progress.wasCanceled():
@@ -3858,11 +3895,17 @@ class MainWindow(QMainWindow, WindowMixin):
             
             # Use user-defined max frames
             num_frames = min(self.img_count - current_idx - 1, self.max_tracking_frames)
-            progress = QProgressDialog("連続ID変更処理中...", "キャンセル", 0, num_frames, self)
+            progress = QProgressDialog(self)
+            progress.setLabelText("連続ID変更処理中...")
+            progress.setCancelButtonText("キャンセル")
+            progress.setRange(0, num_frames)
             progress.setWindowTitle("処理中")
-            progress.setWindowModality(Qt.WindowModal)
+            progress.setWindowModality(Qt.ApplicationModal)
             progress.setMinimumDuration(0)
+            progress.setMinimumWidth(350)
+            progress.setMinimumHeight(100)
             progress.show()
+            QApplication.processEvents()
             
             # Create list of commands for all frames to update
             change_commands = []
@@ -4262,12 +4305,17 @@ class MainWindow(QMainWindow, WindowMixin):
             image_size = self.image.size()
         
         # プログレスダイアログを作成
-        progress = QProgressDialog("連続ID変更処理中...", "キャンセル", 0,
-                                  self.img_count - frame_idx, self)
+        progress = QProgressDialog(self)
+        progress.setLabelText("連続ID変更処理中...")
+        progress.setCancelButtonText("キャンセル")
+        progress.setRange(0, self.img_count - frame_idx)
         progress.setWindowTitle("処理中")
-        progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowModality(Qt.ApplicationModal)
         progress.setMinimumDuration(0)
+        progress.setMinimumWidth(350)
+        progress.setMinimumHeight(100)
         progress.show()
+        QApplication.processEvents()
         
         while frame_idx < self.img_count:
             # キャンセルチェック
@@ -4382,12 +4430,18 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def _create_progress_dialog(self):
         """Create and configure progress dialog."""
-        progress = QProgressDialog("連続ID付け処理中...", "キャンセル", 0, 
-                                 self.img_count - self.cur_img_idx - 1, self)
+        progress = QProgressDialog(self)
+        progress.setLabelText("連続ID付け処理中...")
+        progress.setCancelButtonText("キャンセル")
+        progress.setRange(0, self.img_count - self.cur_img_idx - 1)
         progress.setWindowTitle("処理中")
-        progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowModality(Qt.ApplicationModal)
         progress.setMinimumDuration(0)
+        progress.setMinimumWidth(350)
+        progress.setMinimumHeight(100)
         progress.setValue(0)
+        progress.show()
+        QApplication.processEvents()
         return progress
     
     def _process_propagation(self, source_shape, progress, current_state, stop_label=None):
