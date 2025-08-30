@@ -2888,6 +2888,7 @@ class MainWindow(QMainWindow, WindowMixin):
     def delete_bbs_in_region(self, region_x1, region_y1, region_x2, region_y2):
         """Delete all bounding boxes completely contained within the specified region."""
         from PyQt5.QtWidgets import QProgressDialog, QApplication
+        from libs.undo.commands.region_deletion_commands import RegionDeletionCommand
         from libs.undo.commands.shape_commands import DeleteShapeCommand
         from libs.undo.commands.composite_command import CompositeCommand
         
@@ -2944,11 +2945,11 @@ class MainWindow(QMainWindow, WindowMixin):
                 
                 print(f"[Region Deletion] Found {len(shapes_to_delete)} shapes to delete in current frame out of {len(self.canvas.shapes)} total shapes")
                 
-                # Create delete commands for current frame (in reverse order to maintain indices)
-                for shape_index, shape in reversed(shapes_to_delete):
-                    delete_cmd = DeleteShapeCommand(target_file, shape_index, shape)
-                    all_delete_commands.append(delete_cmd)
-                    total_deleted += 1
+                # Use RegionDeletionCommand for current frame
+                if shapes_to_delete:
+                    region_cmd = RegionDeletionCommand(target_file, shapes_to_delete)
+                    all_delete_commands.append(region_cmd)
+                    total_deleted += len(shapes_to_delete)
             else:
                 # Other frames - need to load and check
                 shapes_to_delete = self.find_shapes_in_region_for_frame(
@@ -2980,9 +2981,16 @@ class MainWindow(QMainWindow, WindowMixin):
                 all_delete_commands,
                 f"Region deletion: {total_deleted} BBs from {frames_processed} frame(s)"
             )
-            self.undo_manager.execute_command(composite_cmd)
             
-            # Update display
+            # Execute the composite command
+            success = self.undo_manager.execute_command(composite_cmd)
+            
+            if not success:
+                print(f"[Region Deletion] Warning: Some deletions may have failed")
+            else:
+                print(f"[Region Deletion] Successfully deleted {total_deleted} shapes")
+            
+            # Update canvas display without reloading the entire file
             self.canvas.load_shapes(self.canvas.shapes)
             self.label_list.clear()
             self.load_labels(self.canvas.shapes)
