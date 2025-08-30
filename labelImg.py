@@ -1728,20 +1728,25 @@ class MainWindow(QMainWindow, WindowMixin):
             
             # Apply region deletion if enabled
             if self.region_deletion_mode:
-                # Remove the temporary shape from canvas (we don't want to save it)
-                if self.canvas.shapes:
-                    region_shape = self.canvas.shapes.pop()
+                # The shape variable already contains the just-drawn region shape
+                # Get the region bounds from the shape that was just drawn
+                region_points = [(p.x(), p.y()) for p in shape.points]
+                if len(region_points) >= 2:
+                    x_coords = [p[0] for p in region_points]
+                    y_coords = [p[1] for p in region_points]
+                    region_x1, region_x2 = min(x_coords), max(x_coords)
+                    region_y1, region_y2 = min(y_coords), max(y_coords)
                     
-                    # Get the region bounds
-                    region_points = [(p.x(), p.y()) for p in region_shape.points]
-                    if len(region_points) >= 2:
-                        x_coords = [p[0] for p in region_points]
-                        y_coords = [p[1] for p in region_points]
-                        region_x1, region_x2 = min(x_coords), max(x_coords)
-                        region_y1, region_y2 = min(y_coords), max(y_coords)
-                        
-                        # Execute region deletion
-                        self.delete_bbs_in_region(region_x1, region_y1, region_x2, region_y2)
+                    # Remove the temporary shape from canvas (we don't want to save it)
+                    # It was just added by set_last_label, so remove it
+                    if self.canvas.shapes and self.canvas.shapes[-1] == shape:
+                        self.canvas.shapes.pop()
+                    
+                    # Execute region deletion
+                    self.delete_bbs_in_region(region_x1, region_y1, region_x2, region_y2)
+                    
+                    # Update canvas
+                    self.canvas.load_shapes(self.canvas.shapes)
                 
                 # Don't continue with normal shape addition
                 return
@@ -2886,6 +2891,14 @@ class MainWindow(QMainWindow, WindowMixin):
         from libs.undo.commands.shape_commands import DeleteShapeCommand
         from libs.undo.commands.composite_command import CompositeCommand
         
+        # Ensure region coordinates are in correct order
+        if region_x1 > region_x2:
+            region_x1, region_x2 = region_x2, region_x1
+        if region_y1 > region_y2:
+            region_y1, region_y2 = region_y2, region_y1
+        
+        print(f"[Region Deletion] Region bounds: ({region_x1:.1f}, {region_y1:.1f}) to ({region_x2:.1f}, {region_y2:.1f})")
+        
         # Get number of frames to process
         num_frames = self.region_deletion_frames_spinbox.value()
         current_idx = self.cur_img_idx
@@ -2925,9 +2938,11 @@ class MainWindow(QMainWindow, WindowMixin):
             if frame_offset == 0:
                 # Current frame - check current canvas shapes
                 shapes_to_delete = []
-                for i, shape in enumerate(self.canvas.shapes):
-                    if self.is_shape_contained_in_region(shape, region_x1, region_y1, region_x2, region_y2):
-                        shapes_to_delete.append((i, shape))
+                for i, current_shape in enumerate(self.canvas.shapes):
+                    if self.is_shape_contained_in_region(current_shape, region_x1, region_y1, region_x2, region_y2):
+                        shapes_to_delete.append((i, current_shape))
+                
+                print(f"[Region Deletion] Found {len(shapes_to_delete)} shapes to delete in current frame out of {len(self.canvas.shapes)} total shapes")
                 
                 # Create delete commands for current frame (in reverse order to maintain indices)
                 for shape_index, shape in reversed(shapes_to_delete):
@@ -2996,11 +3011,17 @@ class MainWindow(QMainWindow, WindowMixin):
         shape_x1, shape_x2 = min(x_coords), max(x_coords)
         shape_y1, shape_y2 = min(y_coords), max(y_coords)
         
+        # Debug output
+        contained = (region_x1 <= shape_x1 and 
+                    region_y1 <= shape_y1 and
+                    region_x2 >= shape_x2 and
+                    region_y2 >= shape_y2)
+        
+        if contained:
+            print(f"[Region Deletion] Shape {shape.label} at ({shape_x1:.1f}, {shape_y1:.1f}) to ({shape_x2:.1f}, {shape_y2:.1f}) is CONTAINED")
+        
         # Check if shape is completely inside region
-        return (region_x1 <= shape_x1 and 
-                region_y1 <= shape_y1 and
-                region_x2 >= shape_x2 and
-                region_y2 >= shape_y2)
+        return contained
     
     def find_shapes_in_region_for_frame(self, frame_path, region_x1, region_y1, region_x2, region_y2):
         """Find shapes contained in region for a specific frame (without loading it visually)."""
