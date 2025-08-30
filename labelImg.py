@@ -1728,27 +1728,41 @@ class MainWindow(QMainWindow, WindowMixin):
             
             # Apply region deletion if enabled
             if self.region_deletion_mode:
+                print(f"[new_shape] Region deletion mode is active")
                 # The shape variable already contains the just-drawn region shape
                 # Get the region bounds from the shape that was just drawn
                 region_points = [(p.x(), p.y()) for p in shape.points]
+                print(f"[new_shape] Region shape has {len(region_points)} points")
+                
                 if len(region_points) >= 2:
                     x_coords = [p[0] for p in region_points]
                     y_coords = [p[1] for p in region_points]
                     region_x1, region_x2 = min(x_coords), max(x_coords)
                     region_y1, region_y2 = min(y_coords), max(y_coords)
                     
+                    print(f"[new_shape] Region bounds: ({region_x1:.1f}, {region_y1:.1f}) to ({region_x2:.1f}, {region_y2:.1f})")
+                    print(f"[new_shape] Canvas has {len(self.canvas.shapes)} shapes before removing region shape")
+                    
                     # Remove the temporary shape from canvas (we don't want to save it)
                     # It was just added by set_last_label, so remove it
                     if self.canvas.shapes and self.canvas.shapes[-1] == shape:
                         self.canvas.shapes.pop()
+                        print(f"[new_shape] Removed region shape, canvas now has {len(self.canvas.shapes)} shapes")
+                    else:
+                        print(f"[new_shape] Warning: Could not find region shape to remove")
                     
                     # Execute region deletion
+                    print(f"[new_shape] Calling delete_bbs_in_region...")
                     self.delete_bbs_in_region(region_x1, region_y1, region_x2, region_y2)
                     
                     # Update canvas
+                    print(f"[new_shape] Updating canvas display")
                     self.canvas.load_shapes(self.canvas.shapes)
+                else:
+                    print(f"[new_shape] Not enough points in region shape")
                 
                 # Don't continue with normal shape addition
+                print(f"[new_shape] Returning from new_shape (region deletion mode)")
                 return
             
             # Apply BB duplication if enabled
@@ -2887,6 +2901,9 @@ class MainWindow(QMainWindow, WindowMixin):
     
     def delete_bbs_in_region(self, region_x1, region_y1, region_x2, region_y2):
         """Delete all bounding boxes completely contained within the specified region."""
+        print(f"[delete_bbs_in_region] Called with region: ({region_x1:.1f}, {region_y1:.1f}) to ({region_x2:.1f}, {region_y2:.1f})")
+        print(f"[delete_bbs_in_region] Current canvas has {len(self.canvas.shapes)} shapes")
+        
         from PyQt5.QtWidgets import QProgressDialog, QApplication
         from libs.undo.commands.region_deletion_commands import RegionDeletionCommand
         from libs.undo.commands.shape_commands import DeleteShapeCommand
@@ -2895,16 +2912,19 @@ class MainWindow(QMainWindow, WindowMixin):
         # Ensure region coordinates are in correct order
         if region_x1 > region_x2:
             region_x1, region_x2 = region_x2, region_x1
+            print(f"[delete_bbs_in_region] Swapped X coordinates")
         if region_y1 > region_y2:
             region_y1, region_y2 = region_y2, region_y1
+            print(f"[delete_bbs_in_region] Swapped Y coordinates")
         
-        print(f"[Region Deletion] Region bounds: ({region_x1:.1f}, {region_y1:.1f}) to ({region_x2:.1f}, {region_y2:.1f})")
+        print(f"[delete_bbs_in_region] Final region bounds: ({region_x1:.1f}, {region_y1:.1f}) to ({region_x2:.1f}, {region_y2:.1f})")
         
         # Get number of frames to process
         num_frames = self.region_deletion_frames_spinbox.value()
         current_idx = self.cur_img_idx
         
-        print(f"[Region Deletion] Processing {num_frames} frames starting from frame {current_idx}")
+        print(f"[delete_bbs_in_region] Processing {num_frames} frames starting from frame {current_idx}")
+        print(f"[delete_bbs_in_region] Total images available: {self.img_count}")
         
         # Create progress dialog if processing multiple frames
         progress = None
@@ -2944,12 +2964,21 @@ class MainWindow(QMainWindow, WindowMixin):
             # Find shapes to delete in this frame
             if frame_offset == 0:
                 # Current frame - check current canvas shapes
+                print(f"[delete_bbs_in_region] Processing current frame (offset 0)")
+                print(f"[delete_bbs_in_region] Checking {len(self.canvas.shapes)} shapes in current canvas")
+                
                 shapes_to_delete = []
                 for i, current_shape in enumerate(self.canvas.shapes):
+                    shape_label = current_shape.label if hasattr(current_shape, 'label') else 'unknown'
+                    print(f"[delete_bbs_in_region] Checking shape {i}: {shape_label}")
+                    
                     if self.is_shape_contained_in_region(current_shape, region_x1, region_y1, region_x2, region_y2):
                         shapes_to_delete.append((i, current_shape))
+                        print(f"[delete_bbs_in_region] -> Shape {i} ({shape_label}) WILL BE DELETED")
+                    else:
+                        print(f"[delete_bbs_in_region] -> Shape {i} ({shape_label}) will be kept")
                 
-                print(f"[Region Deletion] Found {len(shapes_to_delete)} shapes to delete in current frame out of {len(self.canvas.shapes)} total shapes")
+                print(f"[delete_bbs_in_region] Found {len(shapes_to_delete)} shapes to delete in current frame out of {len(self.canvas.shapes)} total shapes")
                 
                 # Use RegionDeletionCommand for current frame
                 if shapes_to_delete:
@@ -2977,25 +3006,34 @@ class MainWindow(QMainWindow, WindowMixin):
         
         # Execute all delete commands as a composite
         if all_delete_commands:
+            print(f"[delete_bbs_in_region] Creating composite command with {len(all_delete_commands)} commands")
             composite_cmd = CompositeCommand(
                 all_delete_commands,
                 f"Region deletion: {total_deleted} BBs from {frames_processed} frame(s)"
             )
             
             # Execute the composite command
+            print(f"[delete_bbs_in_region] Executing composite command...")
             success = self.undo_manager.execute_command(composite_cmd)
             
             if not success:
-                print(f"[Region Deletion] Warning: Some deletions may have failed")
+                print(f"[delete_bbs_in_region] Warning: Some deletions may have failed")
             else:
-                print(f"[Region Deletion] Successfully deleted {total_deleted} shapes")
+                print(f"[delete_bbs_in_region] Successfully deleted {total_deleted} shapes")
+                print(f"[delete_bbs_in_region] Canvas now has {len(self.canvas.shapes)} shapes after deletion")
             
             # Save if auto-saving is enabled
             if self.auto_saving.isChecked():
                 self.save_file()
             
             # Update display - redraw without reloading
-            print(f"[Region Deletion] Updating display. Canvas has {len(self.canvas.shapes)} shapes")
+            print(f"[delete_bbs_in_region] Updating display. Canvas has {len(self.canvas.shapes)} shapes")
+            
+            # List remaining shapes
+            print(f"[delete_bbs_in_region] Remaining shapes:")
+            for i, shape in enumerate(self.canvas.shapes):
+                shape_label = shape.label if hasattr(shape, 'label') else 'unknown'
+                print(f"[delete_bbs_in_region]   {i}: {shape_label}")
             
             # Update canvas
             self.canvas.update()
@@ -3004,7 +3042,7 @@ class MainWindow(QMainWindow, WindowMixin):
             self.label_list.clear()
             self.load_labels(self.canvas.shapes)
             
-            print(f"[Region Deletion] Display updated. Label list has {self.label_list.count()} items")
+            print(f"[delete_bbs_in_region] Display updated. Label list has {self.label_list.count()} items")
             
             # Show status message
             if frames_processed > 1:
@@ -3023,6 +3061,7 @@ class MainWindow(QMainWindow, WindowMixin):
         # Get shape bounds
         points = shape.points
         if len(points) < 2:
+            print(f"[is_shape_contained_in_region] Shape has less than 2 points, skipping")
             return False
         
         x_coords = [p.x() for p in points]
@@ -3030,16 +3069,26 @@ class MainWindow(QMainWindow, WindowMixin):
         shape_x1, shape_x2 = min(x_coords), max(x_coords)
         shape_y1, shape_y2 = min(y_coords), max(y_coords)
         
-        # Debug output
-        contained = (region_x1 <= shape_x1 and 
-                    region_y1 <= shape_y1 and
-                    region_x2 >= shape_x2 and
-                    region_y2 >= shape_y2)
+        shape_label = shape.label if hasattr(shape, 'label') else 'unknown'
+        
+        print(f"[is_shape_contained_in_region] Shape '{shape_label}' bounds: ({shape_x1:.1f}, {shape_y1:.1f}) to ({shape_x2:.1f}, {shape_y2:.1f})")
+        print(f"[is_shape_contained_in_region] Region bounds: ({region_x1:.1f}, {region_y1:.1f}) to ({region_x2:.1f}, {region_y2:.1f})")
+        
+        # Check each condition separately for debugging
+        x1_ok = region_x1 <= shape_x1
+        y1_ok = region_y1 <= shape_y1
+        x2_ok = region_x2 >= shape_x2
+        y2_ok = region_y2 >= shape_y2
+        
+        print(f"[is_shape_contained_in_region] Containment check: x1={x1_ok}, y1={y1_ok}, x2={x2_ok}, y2={y2_ok}")
+        
+        contained = x1_ok and y1_ok and x2_ok and y2_ok
         
         if contained:
-            print(f"[Region Deletion] Shape {shape.label} at ({shape_x1:.1f}, {shape_y1:.1f}) to ({shape_x2:.1f}, {shape_y2:.1f}) is CONTAINED")
+            print(f"[is_shape_contained_in_region] Shape '{shape_label}' is CONTAINED in region")
+        else:
+            print(f"[is_shape_contained_in_region] Shape '{shape_label}' is NOT contained in region")
         
-        # Check if shape is completely inside region
         return contained
     
     def find_shapes_in_region_for_frame(self, frame_path, region_x1, region_y1, region_x2, region_y2):
