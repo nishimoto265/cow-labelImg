@@ -2904,6 +2904,8 @@ class MainWindow(QMainWindow, WindowMixin):
         num_frames = self.region_deletion_frames_spinbox.value()
         current_idx = self.cur_img_idx
         
+        print(f"[Region Deletion] Processing {num_frames} frames starting from frame {current_idx}")
+        
         # Create progress dialog if processing multiple frames
         progress = None
         if num_frames > 1:
@@ -2925,7 +2927,10 @@ class MainWindow(QMainWindow, WindowMixin):
                 
             target_idx = current_idx + frame_offset
             if target_idx >= self.img_count:
+                print(f"[Region Deletion] Reached end of images at frame {target_idx}")
                 break
+            
+            print(f"[Region Deletion] Processing frame offset {frame_offset}, target index {target_idx}")
             
             if progress:
                 progress.setValue(frame_offset)
@@ -2934,6 +2939,7 @@ class MainWindow(QMainWindow, WindowMixin):
             
             # Get the target file
             target_file = self.m_img_list[target_idx] if frame_offset > 0 else self.file_path
+            print(f"[Region Deletion] Target file: {target_file}")
             
             # Find shapes to delete in this frame
             if frame_offset == 0:
@@ -2951,24 +2957,18 @@ class MainWindow(QMainWindow, WindowMixin):
                     all_delete_commands.append(region_cmd)
                     total_deleted += len(shapes_to_delete)
             else:
-                # Other frames - need to load and check
-                shapes_to_delete = self.find_shapes_in_region_for_frame(
+                # Other frames - use specialized command
+                print(f"[Region Deletion] Creating deletion command for other frame: {target_file}")
+                from libs.undo.commands.region_deletion_other_frame_commands import RegionDeletionOtherFrameCommand
+                
+                other_frame_cmd = RegionDeletionOtherFrameCommand(
                     target_file, region_x1, region_y1, region_x2, region_y2
                 )
+                all_delete_commands.append(other_frame_cmd)
                 
-                # Create delete commands for this frame
-                for shape_index, shape_data in reversed(shapes_to_delete):
-                    # Create a temporary shape object for the command
-                    from libs.shape import Shape
-                    temp_shape = Shape()
-                    temp_shape.label = shape_data.get('label', '')
-                    temp_shape.label2 = shape_data.get('label2', '')
-                    temp_shape.points = shape_data.get('points', [])
-                    temp_shape.difficult = shape_data.get('difficult', False)
-                    
-                    delete_cmd = DeleteShapeCommand(target_file, shape_index, temp_shape)
-                    all_delete_commands.append(delete_cmd)
-                    total_deleted += 1
+                # We don't know how many will be deleted until execution, so estimate
+                # This is just for the progress message
+                total_deleted += 1  # Will be updated after execution
             
             frames_processed += 1
         
@@ -2994,10 +2994,17 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.auto_saving.isChecked():
                 self.save_file()
             
-            # Update display
-            self.canvas.load_shapes(self.canvas.shapes)
+            # Update display - redraw without reloading
+            print(f"[Region Deletion] Updating display. Canvas has {len(self.canvas.shapes)} shapes")
+            
+            # Update canvas
+            self.canvas.update()
+            
+            # Rebuild label list
             self.label_list.clear()
             self.load_labels(self.canvas.shapes)
+            
+            print(f"[Region Deletion] Display updated. Label list has {self.label_list.count()} items")
             
             # Show status message
             if frames_processed > 1:

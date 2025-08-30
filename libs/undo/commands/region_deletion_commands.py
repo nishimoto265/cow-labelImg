@@ -60,11 +60,17 @@ class RegionDeletionCommand(Command):
             bool: True if successful, False otherwise
         """
         try:
+            print(f"[RegionDeletionCommand] Executing deletion of {len(self.deleted_shapes)} shapes")
+            
             # Load target frame if different
             if app.file_path != self.frame_path:
+                print(f"[RegionDeletionCommand] Loading frame: {self.frame_path}")
                 app.load_file(self.frame_path, preserve_zoom=True)
             
+            print(f"[RegionDeletionCommand] Canvas has {len(app.canvas.shapes)} shapes before deletion")
+            
             # Delete shapes in reverse order (highest index first) to maintain indices
+            deleted_count = 0
             for shape_data in reversed(self.deleted_shapes):
                 shape_ref = shape_data.get('shape_ref')
                 if shape_ref and shape_ref in app.canvas.shapes:
@@ -73,6 +79,11 @@ class RegionDeletionCommand(Command):
                         app.remove_label(shape_ref)
                     # Remove from canvas
                     app.canvas.shapes.remove(shape_ref)
+                    deleted_count += 1
+                    print(f"[RegionDeletionCommand] Deleted shape: {shape_data.get('label', 'unknown')}")
+            
+            print(f"[RegionDeletionCommand] Actually deleted {deleted_count} shapes")
+            print(f"[RegionDeletionCommand] Canvas has {len(app.canvas.shapes)} shapes after deletion")
             
             # Update canvas
             if hasattr(app.canvas, 'load_shapes'):
