@@ -2990,7 +2990,11 @@ class MainWindow(QMainWindow, WindowMixin):
             else:
                 print(f"[Region Deletion] Successfully deleted {total_deleted} shapes")
             
-            # Update canvas display without reloading the entire file
+            # Save if auto-saving is enabled
+            if self.auto_saving.isChecked():
+                self.save_file()
+            
+            # Update display
             self.canvas.load_shapes(self.canvas.shapes)
             self.label_list.clear()
             self.load_labels(self.canvas.shapes)
@@ -3039,7 +3043,7 @@ class MainWindow(QMainWindow, WindowMixin):
         from PyQt5.QtCore import QPointF
         
         # Determine the annotation file path and format
-        if self.usingPascalVocFormat:
+        if self.label_file_format == LabelFileFormat.PASCAL_VOC:
             # Pascal VOC format
             ann_path = frame_path.replace('.jpg', '.xml').replace('.png', '.xml')
             if os.path.exists(ann_path):

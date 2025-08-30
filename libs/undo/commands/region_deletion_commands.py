@@ -80,12 +80,16 @@ class RegionDeletionCommand(Command):
             elif hasattr(app.canvas, 'update'):
                 app.canvas.update()
             
+            # Update label list
+            if hasattr(app, 'label_list'):
+                app.label_list.clear()
+                if hasattr(app, 'load_labels'):
+                    app.load_labels(app.canvas.shapes)
+            
             # Mark as dirty
             app.set_dirty()
             
-            # Auto-save if enabled
-            if hasattr(app, 'auto_saving') and app.auto_saving.isChecked():
-                app.save_file()
+            # Do NOT auto-save here - let the main app decide when to save
             
             self.executed = True
             return True
@@ -149,12 +153,16 @@ class RegionDeletionCommand(Command):
             elif hasattr(app.canvas, 'update'):
                 app.canvas.update()
             
+            # Update label list
+            if hasattr(app, 'label_list'):
+                app.label_list.clear()
+                if hasattr(app, 'load_labels'):
+                    app.load_labels(app.canvas.shapes)
+            
             # Mark as dirty
             app.set_dirty()
             
-            # Auto-save if enabled
-            if hasattr(app, 'auto_saving') and app.auto_saving.isChecked():
-                app.save_file()
+            # Do NOT auto-save here - let the main app decide when to save
             
             self.executed = False
             return True
