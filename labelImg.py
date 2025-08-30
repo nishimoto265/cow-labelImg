@@ -2931,7 +2931,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 
                 # Create delete commands for current frame (in reverse order to maintain indices)
                 for shape_index, shape in reversed(shapes_to_delete):
-                    delete_cmd = DeleteShapeCommand(target_file, shape_index)
+                    delete_cmd = DeleteShapeCommand(target_file, shape_index, shape)
                     all_delete_commands.append(delete_cmd)
                     total_deleted += 1
             else:
@@ -2941,8 +2941,16 @@ class MainWindow(QMainWindow, WindowMixin):
                 )
                 
                 # Create delete commands for this frame
-                for shape_index in reversed(shapes_to_delete):
-                    delete_cmd = DeleteShapeCommand(target_file, shape_index)
+                for shape_index, shape_data in reversed(shapes_to_delete):
+                    # Create a temporary shape object for the command
+                    from libs.shape import Shape
+                    temp_shape = Shape()
+                    temp_shape.label = shape_data.get('label', '')
+                    temp_shape.label2 = shape_data.get('label2', '')
+                    temp_shape.points = shape_data.get('points', [])
+                    temp_shape.difficult = shape_data.get('difficult', False)
+                    
+                    delete_cmd = DeleteShapeCommand(target_file, shape_index, temp_shape)
                     all_delete_commands.append(delete_cmd)
                     total_deleted += 1
             
@@ -2999,6 +3007,7 @@ class MainWindow(QMainWindow, WindowMixin):
         import os
         from libs.yolo_io import YoloReader
         from libs.pascal_voc_io import PascalVocReader
+        from PyQt5.QtCore import QPointF
         
         # Determine the annotation file path and format
         if self.usingPascalVocFormat:
@@ -3025,8 +3034,8 @@ class MainWindow(QMainWindow, WindowMixin):
             else:
                 return []
         
-        # Find shapes contained in region
-        indices_to_delete = []
+        # Find shapes contained in region and prepare shape data
+        shapes_to_delete = []
         for i, (label, points, _, _, difficult, label2) in enumerate(shapes):
             # Convert points to QPointF-like format for consistency
             x_coords = [p[0] for p in points]
@@ -3039,9 +3048,16 @@ class MainWindow(QMainWindow, WindowMixin):
                 region_y1 <= shape_y1 and
                 region_x2 >= shape_x2 and
                 region_y2 >= shape_y2):
-                indices_to_delete.append(i)
+                # Create shape data for the DeleteShapeCommand
+                shape_data = {
+                    'label': label,
+                    'label2': label2 if label2 else '',
+                    'points': [QPointF(p[0], p[1]) for p in points],
+                    'difficult': difficult
+                }
+                shapes_to_delete.append((i, shape_data))
         
-        return indices_to_delete
+        return shapes_to_delete
     
     def toggle_quick_id_selector(self):
         """Quick ID Selectorの表示/非表示を切り替え"""
