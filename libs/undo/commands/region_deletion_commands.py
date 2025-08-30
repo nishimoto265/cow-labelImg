@@ -25,6 +25,7 @@ class RegionDeletionCommand(Command):
         super().__init__()
         self.frame_path = frame_path
         self.deleted_shapes = []
+        self._description = f"Delete {len(shapes_to_delete)} shapes in region"
         
         # Store shape data for restoration (in original order)
         for shape_index, shape in shapes_to_delete:
@@ -169,3 +170,21 @@ class RegionDeletionCommand(Command):
         Re-execute the deletion
         """
         return self.execute(app)
+    
+    @property
+    def description(self) -> str:
+        """Get command description"""
+        return self._description
+    
+    def can_merge_with(self, other: 'Command') -> bool:
+        """Region deletions cannot be merged"""
+        return False
+    
+    def merge(self, other: 'Command') -> bool:
+        """Region deletions cannot be merged"""
+        return False
+    
+    @property
+    def affects_save_state(self) -> bool:
+        """Region deletions affect save state"""
+        return True
