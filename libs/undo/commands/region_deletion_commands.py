@@ -4,7 +4,7 @@ Region deletion commands for undo/redo functionality
 
 import logging
 from typing import Any, List, Tuple, Dict
-from .command import Command
+from ..command import Command
 
 logger = logging.getLogger(__name__)
 
