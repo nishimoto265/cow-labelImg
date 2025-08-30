@@ -81,21 +81,14 @@ class RegionDeletionCommand(Command):
                     app.canvas.shapes.remove(shape_ref)
                     deleted_count += 1
                     print(f"[RegionDeletionCommand] Deleted shape: {shape_data.get('label', 'unknown')}")
+                else:
+                    print(f"[RegionDeletionCommand] Warning: Shape {shape_data.get('label', 'unknown')} not found in canvas")
             
             print(f"[RegionDeletionCommand] Actually deleted {deleted_count} shapes")
             print(f"[RegionDeletionCommand] Canvas has {len(app.canvas.shapes)} shapes after deletion")
             
-            # Update canvas
-            if hasattr(app.canvas, 'load_shapes'):
-                app.canvas.load_shapes(app.canvas.shapes)
-            elif hasattr(app.canvas, 'update'):
-                app.canvas.update()
-            
-            # Update label list
-            if hasattr(app, 'label_list'):
-                app.label_list.clear()
-                if hasattr(app, 'load_labels'):
-                    app.load_labels(app.canvas.shapes)
+            # DON'T update canvas here - let the main method handle it
+            # The main delete_bbs_in_region method will update the display
             
             # Mark as dirty
             app.set_dirty()

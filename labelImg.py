@@ -3026,17 +3026,21 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.auto_saving.isChecked():
                 self.save_file()
             
-            # Update display - redraw without reloading
-            print(f"[delete_bbs_in_region] Updating display. Canvas has {len(self.canvas.shapes)} shapes")
+            # Update display - need to reload shapes properly
+            print(f"[delete_bbs_in_region] Before update: Canvas has {len(self.canvas.shapes)} shapes")
+            
+            # Update canvas display without reloading shapes
+            if hasattr(self.canvas, 'update'):
+                print(f"[delete_bbs_in_region] Updating canvas display...")
+                self.canvas.update()
+            
+            print(f"[delete_bbs_in_region] After canvas.load_shapes: Canvas has {len(self.canvas.shapes)} shapes")
             
             # List remaining shapes
             print(f"[delete_bbs_in_region] Remaining shapes:")
             for i, shape in enumerate(self.canvas.shapes):
                 shape_label = shape.label if hasattr(shape, 'label') else 'unknown'
                 print(f"[delete_bbs_in_region]   {i}: {shape_label}")
-            
-            # Update canvas
-            self.canvas.update()
             
             # Rebuild label list
             self.label_list.clear()
